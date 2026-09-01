@@ -3,16 +3,22 @@ import { DEFAULT_INTERVAL, DEFAULT_LIMIT, DEFAULT_SYMBOL } from '../constants/ap
 import { fetchCandles } from '../utils/api/candles.js';
 
 /**
- * Loads the historical window that seeds the chart.
- * Also exposes refetch(), which the stream uses after a reconnect to repair
- * any candles that closed while the socket was down.
+ * Loads the historical window that seeds the chart, with its indicator series.
+ *
+ * Also exposes refetch(), which the stream uses after a reconnect to repair any
+ * candles that closed while the socket was down.
+ *
+ * Candles and indicators are held in ONE state object, updated in one call.
+ * Splitting them into two useState values would let a render land between the
+ * two updates, drawing new candles against stale indicator lines.
  */
 export function useCandleHistory({
   symbol = DEFAULT_SYMBOL,
   interval = DEFAULT_INTERVAL,
   limit = DEFAULT_LIMIT,
+  indicators = true,
 } = {}) {
-  const [candles, setCandles] = useState(null);
+  const [history, setHistory] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -29,20 +35,26 @@ export function useCandleHistory({
     setError(null);
 
     try {
-      const rows = await fetchCandles({ symbol, interval, limit, signal: controller.signal });
-      setCandles(rows);
+      const result = await fetchCandles({
+        symbol,
+        interval,
+        limit,
+        indicators,
+        signal: controller.signal,
+      });
+      setHistory(result);
     } catch (err) {
       if (err.name === 'AbortError') return; // superseded or unmounted: not an error
       setError(err.message);
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [symbol, interval, limit]);
+  }, [symbol, interval, limit, indicators]);
 
   useEffect(() => {
     load();
     return () => abortRef.current?.abort();
   }, [load]);
 
-  return { candles, error, loading, refetch: load };
+  return { history, error, loading, refetch: load };
 }

@@ -1,24 +1,30 @@
 import { MS_PER_SECOND } from '../../constants/chart.js';
 
 /**
+ * Epoch milliseconds -> epoch seconds.
+ *
+ * lightweight-charts expects SECONDS. The whole backend uses MILLISECONDS.
+ * Pass milliseconds and every bar lands ~55,000 years in the future: the chart
+ * renders blank with no error and nothing in the console.
+ *
+ * Every series on the chart routes its timestamps through this one function, so
+ * a candle and its indicator line can never disagree about where "now" is.
+ */
+export function toChartTime(openTimeMs) {
+  return Math.floor(openTimeMs / MS_PER_SECOND);
+}
+
+/**
  * API candle -> lightweight-charts candlestick point.
  *
- * Two conversions happen here, and both are load-bearing:
- *
- * 1. TIME UNITS. Binance and our database use epoch MILLISECONDS.
- *    lightweight-charts expects epoch SECONDS. Feed it milliseconds and every
- *    bar lands ~55,000 years in the future — the chart renders blank with no
- *    error, which is a genuinely confusing hour to debug.
- *
- * 2. STRING -> NUMBER. Prices travel as strings all the way from Binance so
- *    they stay exact. This is the one place that must convert, because the
- *    charting library needs numbers to compute pixel positions. Converting
- *    HERE and nowhere else keeps the lossy step at the very edge of the system,
- *    for display only — never on a value we store or trade on.
+ * Prices arrive as strings and stay strings all the way from Binance so they
+ * remain exact. This is the one place they become numbers, because a canvas
+ * needs numbers to compute pixel positions — display only, never a stored or
+ * traded value.
  */
 export function toChartCandle(candle) {
   return {
-    time: Math.floor(candle.open_time / MS_PER_SECOND),
+    time: toChartTime(candle.open_time),
     open: Number(candle.open),
     high: Number(candle.high),
     low: Number(candle.low),

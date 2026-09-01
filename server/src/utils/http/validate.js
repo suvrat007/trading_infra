@@ -49,6 +49,25 @@ function parseLimit(raw) {
 }
 
 /**
+ * Query flags arrive as strings ("true"), never booleans. Accept the handful
+ * of spellings a client might reasonably send and reject anything else, rather
+ * than treating every non-empty string as true — which would make
+ * `?indicators=false` mean the opposite of what it says.
+ */
+function parseBooleanFlag(raw, name) {
+  if (raw === undefined || raw === '') return false;
+
+  const value = String(raw).trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(value)) return true;
+  if (['false', '0', 'no'].includes(value)) return false;
+
+  throw ApiError.badRequest(
+    ERROR_CODE.INVALID_FLAG,
+    `${name} must be one of: true, false, 1, 0, yes, no`
+  );
+}
+
+/**
  * Validate and normalize the query for GET /api/candles.
  * Everything past this point can trust its inputs.
  */
@@ -57,5 +76,6 @@ export function parseCandlesQuery(query = {}) {
     symbol: parseSymbol(query.symbol),
     interval: parseInterval(query.interval),
     limit: parseLimit(query.limit),
+    includeIndicators: parseBooleanFlag(query.indicators, 'indicators'),
   };
 }

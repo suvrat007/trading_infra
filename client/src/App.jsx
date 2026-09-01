@@ -1,28 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CandleChart } from './components/CandleChart.jsx';
+import { ChartLegend } from './components/ChartLegend.jsx';
 import { ConnectionStatus } from './components/ConnectionStatus.jsx';
+import { IndicatorToggles } from './components/IndicatorToggles.jsx';
 import { DEFAULT_INTERVAL, DEFAULT_SYMBOL } from './constants/api.js';
 import { useCandleHistory } from './hooks/useCandleHistory.js';
 import { useCandleStream } from './hooks/useCandleStream.js';
+import { useIndicatorVisibility } from './hooks/useIndicatorVisibility.js';
+
+/** Series arrays -> the scalar tail of each, matching a live candle's shape. */
+function latestOf(series) {
+  if (!series) return null;
+
+  return Object.fromEntries(
+    Object.entries(series).map(([key, values]) => [key, values.at(-1) ?? null])
+  );
+}
 
 export default function App() {
   const chartRef = useRef(null);
   const [lastPrice, setLastPrice] = useState(null);
+  const [indicatorValues, setIndicatorValues] = useState(null);
 
-  const { candles, error, loading, refetch } = useCandleHistory();
+  const { history, error, loading, refetch } = useCandleHistory();
+  const { visibility, toggle } = useIndicatorVisibility(chartRef);
 
   // Seed the chart once history arrives, and again after a reconnect backfill.
   useEffect(() => {
-    if (!candles?.length) return;
-    chartRef.current?.setCandles(candles);
-    setLastPrice(candles.at(-1).close);
-  }, [candles]);
+    if (!history?.candles?.length) return;
 
-  // Straight to the chart's imperative handle — no setState, so a new candle
-  // does not re-render this component or anything under it.
+    chartRef.current?.setHistory(history.candles, history.indicators);
+    setLastPrice(history.candles.at(-1).close);
+    setIndicatorValues(latestOf(history.indicators));
+  }, [history]);
+
+  /**
+   * Chart data goes straight to the canvas through the ref — no setState, so
+   * nine series are redrawn without React being involved at all.
+   *
+   * The two setState calls below drive only the small text readouts in the
+   * header and legend. CandleChart is memoized and takes no props, so it never
+   * re-renders when they change.
+   */
   const handleCandle = useCallback((candle) => {
     chartRef.current?.appendCandle(candle);
-    setLastPrice(candle.close); // the header is the only React-rendered readout
+
+    setLastPrice(candle.close);
+    if (candle.indicators) setIndicatorValues(candle.indicators);
   }, []);
 
   const { status } = useCandleStream({ onCandle: handleCandle, onReconnect: refetch });
@@ -40,12 +64,15 @@ export default function App() {
         </div>
       </header>
 
+      <IndicatorToggles visibility={visibility} onToggle={toggle} />
+
       <main className="chart-wrapper">
         {/* The chart mounts immediately and stays mounted; overlays sit on top
             so loading or an error never unmounts and rebuilds the canvas. */}
         <CandleChart ref={chartRef} />
+        <ChartLegend values={indicatorValues} visibility={visibility} />
 
-        {loading && !candles && <div className="overlay">Loading candles…</div>}
+        {loading && !history && <div className="overlay">Loading candles…</div>}
         {error && (
           <div className="overlay overlay--error">
             <p>{error}</p>

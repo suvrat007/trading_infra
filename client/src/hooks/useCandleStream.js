@@ -11,11 +11,10 @@ import { isCandleMessage, parseStreamMessage } from '../utils/stream/message.js'
  * @param {() => void} [onReconnect]            called after a *re*connect, so the
  *   caller can backfill candles missed while the socket was down
  */
+
 export function useCandleStream({ onCandle, onReconnect }) {
   const [status, setStatus] = useState(CONNECTION_STATUS.CONNECTING);
 
-  // Callbacks live in refs so that a parent re-render (which creates new
-  // function identities) does not tear down and rebuild the socket.
   const onCandleRef = useRef(onCandle);
   const onReconnectRef = useRef(onReconnect);
   onCandleRef.current = onCandle;
@@ -50,7 +49,6 @@ export function useCandleStream({ onCandle, onReconnect }) {
       };
 
       // 'error' is always followed by 'close', so reconnect logic lives in one
-      // place only — otherwise every failure would schedule two reconnects.
       socket.onerror = () => {};
 
       socket.onclose = () => {

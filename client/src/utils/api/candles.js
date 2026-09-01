@@ -4,24 +4,33 @@ import {
   FETCH_TIMEOUT_MS,
 } from '../../constants/api.js';
 
-function buildCandlesUrl({ symbol, interval, limit }) {
+function buildCandlesUrl({ symbol, interval, limit, indicators }) {
   const url = new URL(CANDLES_ENDPOINT, API_BASE_URL);
   url.searchParams.set('symbol', symbol);
   url.searchParams.set('interval', interval);
   url.searchParams.set('limit', String(limit));
+  if (indicators) url.searchParams.set('indicators', 'true');
   return url.toString();
 }
 
 /**
- * @param {AbortSignal} [signal] cancels the request when the component
- *   unmounts, so a slow response cannot resolve into a dead component.
+ * Fetch the historical window, optionally with every indicator series.
+ *
+ * Indicators are computed on the SERVER, not here. The same code that feeds the
+ * live WebSocket values produces these, so a line drawn from history and the
+ * point appended to it a minute later cannot disagree — which they would if the
+ * browser reimplemented the math.
+ *
+ * @param {AbortSignal} [signal] cancels on unmount, so a slow response cannot
+ *   resolve into a dead component.
+ * @returns {Promise<{candles: object[], indicators: object|null}>}
  */
-export async function fetchCandles({ symbol, interval, limit, signal }) {
-  // Two independent reasons to abort — unmount and timeout — so combine them.
+
+export async function fetchCandles({ symbol, interval, limit, indicators = false, signal }) {
   const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
-  const response = await fetch(buildCandlesUrl({ symbol, interval, limit }), {
+  const response = await fetch(buildCandlesUrl({ symbol, interval, limit, indicators }), {
     signal: combined,
   });
 
@@ -32,5 +41,9 @@ export async function fetchCandles({ symbol, interval, limit, signal }) {
   }
 
   const body = await response.json();
-  return body.candles ?? [];
+
+  return {
+    candles: body.candles ?? [],
+    indicators: body.indicators ?? null,
+  };
 }

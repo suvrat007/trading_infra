@@ -108,3 +108,127 @@ body {
 }
 
 .overlay button:hover { border-color: var(--muted); }
+
+/* ---- indicator toggles -------------------------------------------------- */
+
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.55rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.28rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.74rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.toggle:hover { background: rgba(255, 255, 255, 0.03); }
+
+.toggle--on { color: var(--text); }
+
+/* The native checkbox stays in the DOM for keyboard and screen readers; only
+   its default appearance is removed. Hiding it with display:none would take it
+   out of the tab order and break both. */
+.toggle__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle:has(.toggle__input:focus-visible) {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.toggle__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  opacity: 0.25;
+  transition: opacity 120ms ease;
+}
+
+.toggle--on .toggle__swatch { opacity: 1; }
+
+.toggle__label { line-height: 1; }
+
+/* ---- indicator legend ---------------------------------------------------- */
+
+.legend {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.75rem;
+  z-index: 2;
+  padding: 0.5rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  background: rgba(20, 25, 34, 0.8);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.72rem;
+
+  /* The chart owns the pointer: the legend must never eat a drag or a scroll. */
+  pointer-events: none;
+  user-select: none;
+}
+
+.legend__group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+}
+
+.legend__group + .legend__group {
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+
+.legend__heading {
+  color: var(--muted);
+  font-size: 0.63rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding-bottom: 0.1rem;
+}
+
+.legend__item {
+  display: grid;
+  grid-template-columns: 10px 6.5rem auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.legend__swatch {
+  width: 10px;
+  border-radius: 1px;
+}
+
+.legend__label { color: var(--muted); }
+
+.legend__value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* RSI extremes: the number is the signal, so it carries the colour. */
+.legend__value--high { color: var(--red); }
+.legend__value--low { color: var(--green); }
