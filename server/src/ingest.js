@@ -10,24 +10,25 @@ import { parseJsonFrame } from './utils/ingest/frame.js';
 import { isClosedKline, klineToCandle, klineToRow } from './utils/ingest/kline.js';
 import { formatCandleLog, formatDuplicateLog } from './utils/ingest/logFormat.js';
 
-// Anything downstream (the broadcast server in step 4) subscribes here instead
-// of reaching into this module. One producer, N consumers, no coupling.
+// Anything downstream subscribes here instead of reaching into this module.
+// One producer, N consumers, no coupling.
 export const candles = new EventEmitter();
 
 let ws = null;
 let attempt = 0;
 let staleTimer = null;
 let stopped = false;
+let onConnect = null;
 
-function armStaleTimer() {
+const armStaleTimer = () => {
   clearTimeout(staleTimer);
   staleTimer = setTimeout(() => {
     console.warn(`${LOG_INGEST} no data for ${STALE_MS / 1000}s — forcing reconnect`);
     ws?.terminate(); // terminate, not close: don't wait for a dead peer's FIN
   }, STALE_MS);
-}
+};
 
-async function persist(k) {
+const persist = async (k) => {
   const res = await pool.query(SQL_INSERT_CANDLE, klineToRow(k));
 
   if (res.rowCount === 0) {
@@ -38,9 +39,9 @@ async function persist(k) {
   const candle = klineToCandle(k, res.rows[0].id);
   console.log(`${LOG_INGEST} ${formatCandleLog(candle)}`);
   return candle;
-}
+};
 
-function connect() {
+const connect = () => {
   if (stopped) return;
 
   console.log(`${LOG_INGEST} connecting -> ${KLINE_STREAM_URL}`);
@@ -50,6 +51,13 @@ function connect() {
     attempt = 0;
     console.log(`${LOG_INGEST} connected, streaming ${SYMBOL} ${INTERVAL} klines`);
     armStaleTimer();
+
+    // Fires on the FIRST connection and on every reconnect, so startup recovery
+    // and outage recovery are the same code path. Deliberately not awaited: a
+    // slow backfill must not delay processing of live candles arriving now.
+    Promise.resolve(onConnect?.()).catch((err) =>
+      console.error(`${LOG_INGEST} onConnect handler failed:`, err.message)
+    );
   });
 
   ws.on('message', async (raw) => {
@@ -60,14 +68,14 @@ function connect() {
       console.error(`${LOG_INGEST} non-JSON frame ignored`);
       return;
     }
-    if (!isClosedKline(msg)) return;
+    if (!isClosedKline(msg)) return; // still forming, or not a kline event
 
     try {
       const candle = await persist(msg.k);
       if (candle) candles.emit('candle', candle);
     } catch (err) {
       // Never let a DB failure take down the socket. Losing one candle beats
-      // losing the stream; REST backfill can repair a gap later.
+      // losing the stream; the backfill on the next reconnect repairs the gap.
       console.error(`${LOG_INGEST} insert failed:`, err.message);
     }
   });
@@ -87,15 +95,22 @@ function connect() {
     );
     setTimeout(connect, delay);
   });
-}
+};
 
-export function startIngest() {
+/**
+ * @param {object}   [options]
+ * @param {Function} [options.onConnect] called on every successful connection,
+ *   first included. Used to trigger gap recovery.
+ */
+export const startIngest = ({ onConnect: handler = null } = {}) => {
   stopped = false;
+  onConnect = handler;
   connect();
-}
+};
 
-export function stopIngest() {
+export const stopIngest = () => {
   stopped = true;
+  onConnect = null;
   clearTimeout(staleTimer);
   ws?.close();
-}
+};

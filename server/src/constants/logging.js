@@ -4,3 +4,6 @@ export const LOG_APP = '[app]';
 export const LOG_HTTP = '[http]';
 export const LOG_WS = '[ws]';
 export const LOG_INDICATORS = '[indicators]';
+export const LOG_BACKFILL = '[backfill]';
+export const LOG_AUDIT = '[audit]';
+export const LOG_CONTINUITY = '[continuity]';

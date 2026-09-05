@@ -52,3 +52,20 @@ export const PERIODS = {
  * accuracy and keeps 80123.45600000001 out of every WebSocket frame.
  */
 export const INDICATOR_PRECISION = 8;
+
+/**
+ * Every wire name the engine can produce.
+ *
+ * Lives here rather than beside the registry so that strategies — which consume
+ * indicator values but must not depend on how they are computed — can validate
+ * their parameters against it without importing the engine.
+ */
+export const INDICATOR_KEYS = Object.freeze([
+  'sma20', 'sma50', 'ema20', 'ema50',
+  'rsi14',
+  'macd', 'macdSignal', 'macdHistogram',
+  'bbUpper', 'bbMiddle', 'bbLower', 'bbBandwidth', 'bbPercentB',
+  'atr14', 'stdDev20', 'historicalVolatility20',
+  'stochK', 'stochD', 'williamsR14', 'cci20', 'roc12',
+  'obv', 'vwap20', 'mfi14', 'adLine', 'cmf20', 'volumeSma20',
+]);

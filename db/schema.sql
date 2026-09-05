@@ -1,3 +1,7 @@
+-- Phase 1: Live Market Data Pipeline
+-- Run with:  psql -U postgres -d trading -f db/schema.sql
+--
+-- Idempotent: safe to re-run against an existing database.
 
 CREATE TABLE IF NOT EXISTS candles (
     id          serial PRIMARY KEY,
@@ -12,8 +16,9 @@ CREATE TABLE IF NOT EXISTS candles (
     created_at  timestamptz  NOT NULL DEFAULT now()
 );
 
--- Idempotency: Binance replays the same closed kline on reconnect.
--- This lets the ingester use INSERT ... ON CONFLICT DO NOTHING.
+-- Idempotency: Binance replays the same closed kline on reconnect, and the
+-- backfill deliberately overlaps live data. This lets both use
+-- INSERT ... ON CONFLICT DO NOTHING and need no coordination with each other.
 CREATE UNIQUE INDEX IF NOT EXISTS candles_symbol_interval_open_time_key
     ON candles (symbol, "interval", open_time);
 
@@ -21,3 +26,57 @@ CREATE UNIQUE INDEX IF NOT EXISTS candles_symbol_interval_open_time_key
 -- ORDER BY open_time DESC LIMIT 200 becomes an index-only backward scan.
 CREATE INDEX IF NOT EXISTS candles_symbol_interval_open_time_desc_idx
     ON candles (symbol, "interval", open_time DESC);
+
+
+-- ---------------------------------------------------------------------------
+-- Integrity constraints
+--
+-- These encode facts that are true of a candlestick BY DEFINITION, not
+-- heuristics. A row breaking any of them is corrupt whatever produced it, so
+-- the database refuses it rather than letting an audit discover it an hour
+-- later. Prevention beats detection: there is no window in which bad data
+-- exists, and every writer — live ingest, backfill, a psql session, a future
+-- importer — is covered without having to remember.
+--
+-- Postgres has no ADD CONSTRAINT IF NOT EXISTS, hence the guards, which keep
+-- this file re-runnable.
+-- ---------------------------------------------------------------------------
+
+DO $$
+BEGIN
+    -- The high is the highest price in the bar and the low is the lowest.
+    -- Anything else is not a candle.
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'candles_ohlc_ordered') THEN
+        ALTER TABLE candles ADD CONSTRAINT candles_ohlc_ordered CHECK (
+            high >= low
+            AND high >= open AND high >= close
+            AND low  <= open AND low  <= close
+        );
+    END IF;
+
+    -- A traded price of zero or less is not a price.
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'candles_prices_positive') THEN
+        ALTER TABLE candles ADD CONSTRAINT candles_prices_positive CHECK (
+            open > 0 AND high > 0 AND low > 0 AND close > 0
+        );
+    END IF;
+
+    -- Volume may be zero (a bar in which nothing traded) but never negative.
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'candles_volume_non_negative') THEN
+        ALTER TABLE candles ADD CONSTRAINT candles_volume_non_negative CHECK (volume >= 0);
+    END IF;
+
+    -- open_time is epoch MILLISECONDS. Rejecting values below 2001-09-09
+    -- catches the single most likely unit mistake — seconds passed as
+    -- milliseconds — which would otherwise silently place bars in 1970.
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'candles_open_time_is_millis') THEN
+        ALTER TABLE candles ADD CONSTRAINT candles_open_time_is_millis CHECK (
+            open_time > 1000000000000
+        );
+    END IF;
+END $$;
+
+-- Grid alignment (open_time being an exact multiple of the interval) is
+-- deliberately NOT a constraint: the multiplier depends on the `interval`
+-- column, so the CHECK would need a CASE listing every interval and would have
+-- to be rewritten each time one is added. It is an audit check instead.

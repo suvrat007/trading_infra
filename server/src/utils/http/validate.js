@@ -8,7 +8,7 @@ import { INTERVAL, SYMBOL } from '../../constants/binance.js';
 import { ERROR_CODE } from '../../constants/http.js';
 import { ApiError } from './errors.js';
 
-function parseSymbol(raw) {
+const parseSymbol = (raw) => {
   const symbol = String(raw ?? SYMBOL).trim().toUpperCase();
 
   if (!SYMBOL_PATTERN.test(symbol)) {
@@ -18,9 +18,9 @@ function parseSymbol(raw) {
     );
   }
   return symbol;
-}
+};
 
-function parseInterval(raw) {
+const parseInterval = (raw) => {
   const interval = String(raw ?? INTERVAL).trim();
 
   if (!VALID_INTERVALS.has(interval)) {
@@ -30,9 +30,9 @@ function parseInterval(raw) {
     );
   }
   return interval;
-}
+};
 
-function parseLimit(raw) {
+const parseLimit = (raw) => {
   if (raw === undefined || raw === '') return DEFAULT_CANDLE_LIMIT;
 
   const limit = Number(raw);
@@ -46,7 +46,7 @@ function parseLimit(raw) {
     );
   }
   return limit;
-}
+};
 
 /**
  * Query flags arrive as strings ("true"), never booleans. Accept the handful
@@ -54,7 +54,7 @@ function parseLimit(raw) {
  * than treating every non-empty string as true — which would make
  * `?indicators=false` mean the opposite of what it says.
  */
-function parseBooleanFlag(raw, name) {
+const parseBooleanFlag = (raw, name) => {
   if (raw === undefined || raw === '') return false;
 
   const value = String(raw).trim().toLowerCase();
@@ -65,17 +65,29 @@ function parseBooleanFlag(raw, name) {
     ERROR_CODE.INVALID_FLAG,
     `${name} must be one of: true, false, 1, 0, yes, no`
   );
-}
+};
 
 /**
  * Validate and normalize the query for GET /api/candles.
  * Everything past this point can trust its inputs.
  */
-export function parseCandlesQuery(query = {}) {
+export const parseCandlesQuery = (query = {}) => {
   return {
     symbol: parseSymbol(query.symbol),
     interval: parseInterval(query.interval),
     limit: parseLimit(query.limit),
     includeIndicators: parseBooleanFlag(query.indicators, 'indicators'),
   };
-}
+};
+
+/**
+ * Validate and normalize the query for GET /api/audit.
+ *
+ * `deep` is opt-in because it spends a Binance REST request; leaving it on by
+ * default would make a monitoring probe hammer the exchange.
+ */
+export const parseAuditQuery = (query = {}) => ({
+  symbol: parseSymbol(query.symbol),
+  interval: parseInterval(query.interval),
+  deep: parseBooleanFlag(query.deep, 'deep'),
+});

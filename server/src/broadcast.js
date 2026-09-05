@@ -26,7 +26,6 @@ function handleConnection(ws, req) {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
-  // A client error (reset connection) must not become an unhandled 'error'
   ws.on('error', (err) => console.error(`${LOG_WS} client error:`, err.message));
 
   ws.on('close', () => {

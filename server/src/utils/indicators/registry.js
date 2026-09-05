@@ -1,4 +1,4 @@
-import { PERIODS } from '../../constants/indicators.js';
+import { INDICATOR_KEYS, PERIODS } from '../../constants/indicators.js';
 import { ema, sma } from '../../indicators/trend.js';
 import { cci, macd, roc, rsi, stochastic, williamsR } from '../../indicators/momentum.js';
 import { atr, bollingerBands, historicalVolatility, stdDev } from '../../indicators/volatility.js';
@@ -12,18 +12,8 @@ import {
 } from '../../indicators/volume.js';
 import { closesOf, round, roundSeries } from './convert.js';
 
-/**
- * The glue layer between the sealed `indicators/` math and this application.
- *
- * `indicators/` imports nothing and knows no periods. This file makes every
- * project-specific choice: which indicators exist, at which periods, and under
- * which wire names. Adding an indicator to the whole system — REST, WebSocket,
- * and the frontend toggles — is one entry in this array.
- *
- * Each definition returns an object of {wireName: series}, so one call can
- * produce several outputs (MACD produces three, Bollinger five) without the
- * caller special-casing anything.
- */
+export { INDICATOR_KEYS };
+
 const DEFINITIONS = [
   {
     id: 'movingAverages',
@@ -95,17 +85,6 @@ const DEFINITIONS = [
     }),
   },
 ];
-
-/** Every wire name this engine can produce — used to validate REST requests. */
-export const INDICATOR_KEYS = Object.freeze([
-  'sma20', 'sma50', 'ema20', 'ema50',
-  'rsi14',
-  'macd', 'macdSignal', 'macdHistogram',
-  'bbUpper', 'bbMiddle', 'bbLower', 'bbBandwidth', 'bbPercentB',
-  'atr14', 'stdDev20', 'historicalVolatility20',
-  'stochK', 'stochD', 'williamsR14', 'cci20', 'roc12',
-  'obv', 'vwap20', 'mfi14', 'adLine', 'cmf20', 'volumeSma20',
-]);
 
 /**
  * Run every indicator over one window of candles.
