@@ -73,14 +73,17 @@ test('Strategy: subclass must implement onCandle', () => {
 test('Strategy: params are frozen so recorded trades keep their meaning', () => {
   const strategy = new EMAStrategy();
   assert.throws(() => { strategy.getParams().fastPeriod = 5; }, TypeError);
-  assert.equal(strategy.getParams().fastPeriod, 20);
+  assert.equal(strategy.getParams().fastPeriod, 9);
 });
 
 test('Strategy: name and params are reported', () => {
-  const strategy = new EMAStrategy({ fastPeriod: 20, slowPeriod: 50 });
-  assert.equal(strategy.getName(), 'EMA 20/50 Crossover');
-  assert.deepEqual(strategy.getParams(), { fastPeriod: 20, slowPeriod: 50 });
-  assert.deepEqual(strategy.requiredIndicators(), ['ema20', 'ema50']);
+  const strategy = new EMAStrategy();
+  assert.equal(strategy.getName(), 'EMA 9/21 Crossover');
+  assert.deepEqual(strategy.getParams(), { fastPeriod: 9, slowPeriod: 21 });
+  assert.deepEqual(strategy.requiredIndicators(), ['ema9', 'ema21']);
+
+  // Other computed periods still work; only uncomputed ones are rejected.
+  assert.doesNotThrow(() => new EMAStrategy({ fastPeriod: 20, slowPeriod: 50 }));
   assert.equal(strategy.describe().type, 'EMAStrategy');
 });
 
@@ -91,12 +94,12 @@ test('Strategy: name and params are reported', () => {
 test('EMAStrategy: signals only on the crossing candle', () => {
   const strategy = new EMAStrategy();
   const signals = run(strategy, [
-    { ema20: 10, ema50: 12 },   // below — establishes side
-    { ema20: 11, ema50: 12 },   // still below
-    { ema20: 13, ema50: 12 },   // crossed up
-    { ema20: 15, ema50: 12 },   // still above: no repeat
-    { ema20: 11, ema50: 12 },   // crossed down
-    { ema20: 10, ema50: 12 },   // still below
+    { ema9: 10, ema21: 12 },   // below — establishes side
+    { ema9: 11, ema21: 12 },   // still below
+    { ema9: 13, ema21: 12 },   // crossed up
+    { ema9: 15, ema21: 12 },   // still above: no repeat
+    { ema9: 11, ema21: 12 },   // crossed down
+    { ema9: 10, ema21: 12 },   // still below
   ]);
 
   assert.deepEqual(signals, [null, null, SIGNAL.BUY, null, SIGNAL.SELL, null]);
@@ -106,10 +109,10 @@ test('EMAStrategy: stays silent through warmup and a null payload', () => {
   const strategy = new EMAStrategy();
   const signals = run(strategy, [
     null,                        // engine failed entirely
-    { ema20: null, ema50: null },
-    { ema20: 10, ema50: null },  // partially warmed
-    { ema20: 10, ema50: 12 },    // first usable: side only
-    { ema20: 13, ema50: 12 },    // now a cross
+    { ema9: null, ema21: null },
+    { ema9: 10, ema21: null },  // partially warmed
+    { ema9: 10, ema21: 12 },    // first usable: side only
+    { ema9: 13, ema21: 12 },    // now a cross
   ]);
 
   assert.deepEqual(signals, [null, null, null, null, SIGNAL.BUY]);
@@ -196,11 +199,11 @@ test('MACDStrategy: periods must match the engine configuration', () => {
 
 test('every strategy: reset clears crossover state', () => {
   const strategy = new EMAStrategy();
-  run(strategy, [{ ema20: 10, ema50: 12 }]);
+  run(strategy, [{ ema9: 10, ema21: 12 }]);
   strategy.reset();
-  assert.equal(strategy.onCandle(candle, { ema20: 13, ema50: 12 }), null,
+  assert.equal(strategy.onCandle(candle, { ema9: 13, ema21: 12 }), null,
     'after reset there is no previous side, so no cross');
-  assert.equal(strategy.onCandle(candle, { ema20: 11, ema50: 12 }), SIGNAL.SELL);
+  assert.equal(strategy.onCandle(candle, { ema9: 11, ema21: 12 }), SIGNAL.SELL);
 });
 
 test('every strategy: only ever returns BUY, SELL or null', () => {
@@ -208,9 +211,9 @@ test('every strategy: only ever returns BUY, SELL or null', () => {
   const payloads = [
     null,
     {},
-    { ema20: 1, ema50: 2, rsi14: 50, macd: 1, macdSignal: 2 },
-    { ema20: 3, ema50: 2, rsi14: 10, macd: 3, macdSignal: 2 },
-    { ema20: 1, ema50: 2, rsi14: 90, macd: 1, macdSignal: 2 },
+    { ema9: 1, ema21: 2, rsi14: 50, macd: 1, macdSignal: 2 },
+    { ema9: 3, ema21: 2, rsi14: 10, macd: 3, macdSignal: 2 },
+    { ema9: 1, ema21: 2, rsi14: 90, macd: 1, macdSignal: 2 },
   ];
 
   for (const strategy of strategies) {

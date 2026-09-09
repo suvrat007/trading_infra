@@ -5,14 +5,15 @@ import { INTERVAL, KLINE_STREAM_URL, SYMBOL } from './constants/binance.js';
 import { STALE_MS } from './constants/connection.js';
 import { SQL_INSERT_CANDLE } from './constants/sql.js';
 import { LOG_INGEST } from './constants/logging.js';
+import { pruneSeries } from './retention.js';
 import { backoffDelay } from './utils/ingest/backoff.js';
 import { parseJsonFrame } from './utils/ingest/frame.js';
-import { isClosedKline, klineToCandle, klineToRow } from './utils/ingest/kline.js';
+import { isClosedKline, klineToCandle, klineToRow, klineToTick } from './utils/ingest/kline.js';
 import { formatCandleLog, formatDuplicateLog } from './utils/ingest/logFormat.js';
 
 // Anything downstream subscribes here instead of reaching into this module.
 // One producer, N consumers, no coupling.
-export const candles = new EventEmitter();
+export const candles = new EventEmitter();  
 
 let ws = null;
 let attempt = 0;
@@ -34,6 +35,14 @@ const persist = async (k) => {
   if (res.rowCount === 0) {
     console.log(`${LOG_INGEST} ${formatDuplicateLog(k)}`);
     return null;
+  }
+
+  // One in, one out. Wrapped separately so a prune failure can never cost us
+  // the candle we just stored.
+  try {
+    await pruneSeries(k.s, k.i);
+  } catch (err) {
+    console.error(`${LOG_INGEST} prune failed:`, err.message);
   }
 
   const candle = klineToCandle(k, res.rows[0].id);
@@ -68,7 +77,14 @@ const connect = () => {
       console.error(`${LOG_INGEST} non-JSON frame ignored`);
       return;
     }
-    if (!isClosedKline(msg)) return; // still forming, or not a kline event
+    if (!msg.k) return; // not a kline event
+
+    // Forming bar: broadcast so the chart ticks live, but never store it and
+    // never let it reach the strategy — it can still reverse before it closes.
+    if (!isClosedKline(msg)) {
+      candles.emit('tick', klineToTick(msg.k));
+      return;
+    }
 
     try {
       const candle = await persist(msg.k);

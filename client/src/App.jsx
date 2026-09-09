@@ -1,13 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AccountPanel } from './components/AccountPanel.jsx';
 import { CandleChart } from './components/CandleChart.jsx';
 import { ChartLegend } from './components/ChartLegend.jsx';
 import { ConnectionStatus } from './components/ConnectionStatus.jsx';
 import { IndicatorToggles } from './components/IndicatorToggles.jsx';
+import { PnlChart } from './components/PnlChart.jsx';
+import { StrategyControls } from './components/StrategyControls.jsx';
+import { TradeBlotter } from './components/TradeBlotter.jsx';
 import { DEFAULT_INTERVAL, DEFAULT_SYMBOL } from './constants/api.js';
+import { useAccount } from './hooks/useAccount.js';
+import { useCandleContinuity } from './hooks/useCandleContinuity.js';
 import { useCandleHistory } from './hooks/useCandleHistory.js';
 import { useCandleStream } from './hooks/useCandleStream.js';
-import { useCandleContinuity } from './hooks/useCandleContinuity.js';
 import { useIndicatorVisibility } from './hooks/useIndicatorVisibility.js';
+import { useStrategyControl } from './hooks/useStrategyControl.js';
+import { intervalToMs } from './utils/stream/continuity.js';
+import { toTradeMarkers } from './utils/chart/pnl.js';
+import { toChartTime } from './utils/chart/candle.js';
 
 /** Series arrays -> the scalar tail of each, matching a live candle's shape. */
 const latestOf = (series) => {
@@ -22,12 +31,13 @@ const App = () => {
   const chartRef = useRef(null);
   const [lastPrice, setLastPrice] = useState(null);
   const [indicatorValues, setIndicatorValues] = useState(null);
+  const [liveSignals, setLiveSignals] = useState([]);
 
   const { history, error, loading, refetch } = useCandleHistory();
   const { visibility, toggle } = useIndicatorVisibility(chartRef);
+  const { account, trades, applyAccountMessage } = useAccount();
+  const strategy = useStrategyControl();
 
-  // A detected gap repairs itself by reloading history, which is also what a
-  // reconnect does — one recovery path for both.
   const { accept, syncTo } = useCandleContinuity({
     interval: DEFAULT_INTERVAL,
     onGap: useCallback((missing) => {
@@ -36,8 +46,6 @@ const App = () => {
     }, [refetch]),
   });
 
-  // Seed the chart once history arrives, and again after a reconnect or a gap
-  // repair. syncTo re-anchors continuity to what is now actually on screen.
   useEffect(() => {
     if (!history?.candles?.length) return;
 
@@ -50,13 +58,19 @@ const App = () => {
   }, [history, syncTo]);
 
   /**
-   * Chart data goes straight to the canvas through the ref — no setState, so
-   * ten series are redrawn without React being involved at all.
+   * Markers come from persisted trades PLUS signals seen this session.
    *
-   * The continuity check runs first and can veto: an out-of-order candle is
-   * dropped rather than handed to the chart, which would throw partway through
-   * the series loop and leave the panes disagreeing with each other.
+   * Trades survive a reload but only mark filled orders; live signals also show
+   * the ones the broker rejected, which is exactly what you want to see when a
+   * strategy is signalling but never filling.
    */
+  const markers = useMemo(
+    () => [...toTradeMarkers(trades, intervalToMs(DEFAULT_INTERVAL)), ...liveSignals],
+    [trades, liveSignals]
+  );
+
+  useEffect(() => { chartRef.current?.setSignals(markers); }, [markers]);
+
   const handleCandle = useCallback((candle) => {
     const { drawable, order, missing } = accept(candle.open_time);
 
@@ -64,18 +78,35 @@ const App = () => {
       console.warn(`[stream] dropped ${order} candle at ${candle.open_time}`);
       return;
     }
-
     if (missing > 0) {
       console.warn(`[stream] gap of ${missing} candle(s) before ${candle.open_time}`);
     }
 
     chartRef.current?.appendCandle(candle);
-
     setLastPrice(candle.close);
     if (candle.indicators) setIndicatorValues(candle.indicators);
   }, [accept]);
 
-  const { status } = useCandleStream({ onCandle: handleCandle, onReconnect: refetch });
+  /** Forming bar. Chart and price only — never continuity, never the strategy. */
+  const handleTick = useCallback((tick) => {
+    chartRef.current?.updateTick(tick);
+    setLastPrice(tick.close);
+  }, []);
+
+  const handleSignal = useCallback((signal) => {
+    setLiveSignals((current) => [
+      ...current,
+      { time: toChartTime(signal.open_time), side: signal.signal },
+    ]);
+  }, []);
+
+  const { status } = useCandleStream({
+    onCandle: handleCandle,
+    onTick: handleTick,
+    onSignal: handleSignal,
+    onAccount: applyAccountMessage,
+    onReconnect: refetch,
+  });
 
   return (
     <div className="app">
@@ -92,20 +123,36 @@ const App = () => {
 
       <IndicatorToggles visibility={visibility} onToggle={toggle} />
 
-      <main className="chart-wrapper">
-        {/* The chart mounts immediately and stays mounted; overlays sit on top
-            so loading or an error never unmounts and rebuilds the canvas. */}
-        <CandleChart ref={chartRef} />
-        <ChartLegend values={indicatorValues} visibility={visibility} />
+      <div className="dashboard">
+        <main className="dashboard__main">
+          <div className="chart-wrapper">
+            <CandleChart ref={chartRef} />
+            <ChartLegend values={indicatorValues} visibility={visibility} />
 
-        {loading && !history && <div className="overlay">Loading candles…</div>}
-        {error && (
-          <div className="overlay overlay--error">
-            <p>{error}</p>
-            <button type="button" onClick={refetch}>Retry</button>
+            {loading && !history && <div className="overlay">Loading candles…</div>}
+            {error && (
+              <div className="overlay overlay--error">
+                <p>{error}</p>
+                <button type="button" onClick={refetch}>Retry</button>
+              </div>
+            )}
           </div>
-        )}
-      </main>
+
+          <PnlChart trades={trades} />
+        </main>
+
+        <aside className="dashboard__side">
+          <StrategyControls
+            status={strategy.status}
+            error={strategy.error}
+            busy={strategy.busy}
+            onStart={strategy.start}
+            onStop={strategy.stop}
+          />
+          <AccountPanel account={account} />
+          <TradeBlotter trades={trades} />
+        </aside>
+      </div>
     </div>
   );
 };

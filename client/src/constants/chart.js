@@ -36,3 +36,41 @@ export const PRICE_FORMAT = {
   precision: 2,
   minMove: 0.01,
 };
+
+// ---------------------------------------------------------------------------
+// PnL chart — same palette, no crosshair labels, its own compact axis
+// ---------------------------------------------------------------------------
+
+export const PNL_CHART_OPTIONS = {
+  layout: {
+    background: { color: '#0e1116' },
+    textColor: '#a9b1ba',
+    attributionLogo: false,
+  },
+  grid: {
+    vertLines: { visible: false },
+    horzLines: { color: '#1b212b' },
+  },
+  rightPriceScale: { borderColor: '#2a323d' },
+  timeScale: { borderColor: '#2a323d', timeVisible: true, secondsVisible: false },
+  crosshair: { mode: 0 },
+  autoSize: true,
+};
+
+export const PNL_SERIES_OPTIONS = {
+  lineColor: '#45a0e0',
+  topColor: 'rgba(69, 160, 224, 0.28)',
+  bottomColor: 'rgba(69, 160, 224, 0.02)',
+  lineWidth: 2,
+  priceLineVisible: false,
+  priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+};
+
+// ---------------------------------------------------------------------------
+// Signal markers
+// ---------------------------------------------------------------------------
+
+export const MARKER_STYLE = {
+  BUY: { position: 'belowBar', color: '#26a15e', shape: 'arrowUp', text: 'B' },
+  SELL: { position: 'aboveBar', color: '#e0413e', shape: 'arrowDown', text: 'S' },
+};

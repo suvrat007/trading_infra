@@ -13,3 +13,13 @@ export function parseStreamMessage(raw) {
 export function isCandleMessage(message) {
   return message?.type === WS_MESSAGE_TYPE.CANDLE && Boolean(message.data);
 }
+
+/** The bar currently forming. Not a stored candle — chart only. */
+export const isTickMessage = (message) =>
+  message?.type === WS_MESSAGE_TYPE.TICK && Boolean(message.data);
+
+export const isSignalMessage = (message) =>
+  message?.type === WS_MESSAGE_TYPE.SIGNAL && Boolean(message.data);
+
+export const isAccountMessage = (message) =>
+  message?.type === WS_MESSAGE_TYPE.ACCOUNT && Boolean(message.data);

@@ -3,6 +3,9 @@ export const WS_URL = import.meta.env?.VITE_WS_URL || 'ws://localhost:8080';
 export const WS_MESSAGE_TYPE = {
   WELCOME: 'welcome',
   CANDLE: 'candle',
+  TICK: 'tick',
+  SIGNAL: 'signal',
+  ACCOUNT: 'account',
 };
 
 // Mirrors the server's backoff: exponential, jittered, capped.

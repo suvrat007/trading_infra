@@ -114,3 +114,80 @@ export const SQL_AUDIT_RECENT_SAMPLE = `
   ) recent
   ORDER BY open_time ASC
 `;
+
+// --- paper trading -----------------------------------------------------------
+
+/** Timestamps arrive as epoch ms from the broker; Postgres wants an instant. */
+export const SQL_INSERT_POSITION = `
+  INSERT INTO positions (symbol, quantity, entry_price, opened_at)
+  VALUES ($1, $2, $3, to_timestamp($4 / 1000.0))
+  ON CONFLICT (symbol) DO NOTHING
+  RETURNING id
+`;
+
+export const SQL_DELETE_POSITION = `
+  DELETE FROM positions WHERE symbol = $1 RETURNING id
+`;
+
+export const SQL_SELECT_POSITIONS = `
+  SELECT symbol, quantity, entry_price,
+         (extract(epoch FROM opened_at) * 1000)::bigint AS opened_at
+  FROM positions
+  ORDER BY opened_at ASC
+`;
+
+export const SQL_INSERT_TRADE = `
+  INSERT INTO trades (symbol, side, quantity, entry_price, exit_price, pnl, opened_at, closed_at)
+  VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0), to_timestamp($8 / 1000.0))
+  RETURNING id
+`;
+
+/** Newest first for the UI; the caller reverses when rehydrating the broker. */
+export const SQL_SELECT_TRADES = `
+  SELECT id, symbol, side, quantity, entry_price, exit_price, pnl,
+         (extract(epoch FROM opened_at) * 1000)::bigint AS opened_at,
+         (extract(epoch FROM closed_at) * 1000)::bigint AS closed_at
+  FROM trades
+  ORDER BY closed_at DESC, id DESC
+  LIMIT $1
+`;
+
+export const SQL_SELECT_ALL_TRADES = `
+  SELECT id, symbol, side, quantity, entry_price, exit_price, pnl,
+         (extract(epoch FROM opened_at) * 1000)::bigint AS opened_at,
+         (extract(epoch FROM closed_at) * 1000)::bigint AS closed_at
+  FROM trades
+  ORDER BY closed_at ASC, id ASC
+`;
+
+// --- retention ---------------------------------------------------------------
+
+/** Every (symbol, interval) pair held, so a series orphaned by a config change is still pruned. */
+export const SQL_DISTINCT_SERIES = `
+  SELECT symbol, "interval", count(*)::int AS held
+  FROM candles
+  GROUP BY symbol, "interval"
+  ORDER BY symbol, "interval"
+`;
+
+/**
+ * Drop everything older than the Nth newest candle, keeping exactly N.
+ *
+ * OFFSET $3 - 1 lands on the Nth newest row; deleting strictly older than it
+ * retains rows 1..N. (OFFSET $3 would find the N+1th and retain N+1.)
+ *
+ * The subquery walks the existing (symbol, interval, open_time DESC) index and
+ * stops at row N, so the cutoff is an index scan rather than a sort.
+ */
+export const SQL_PRUNE_CANDLES = `
+  DELETE FROM candles
+  WHERE symbol = $1
+    AND "interval" = $2
+    AND open_time < (
+      SELECT open_time
+      FROM candles
+      WHERE symbol = $1 AND "interval" = $2
+      ORDER BY open_time DESC
+      OFFSET ($3 - 1) LIMIT 1
+    )
+`;

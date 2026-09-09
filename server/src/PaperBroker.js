@@ -192,6 +192,30 @@ export class PaperBroker {
     };
   }
 
+  /**
+   * Liquidate everything at the last seen price. Used when a strategy stops —
+   * leaving a position open with nothing watching it is worse than closing it.
+   */
+  closeAllPositions() {
+    const results = [];
+
+    for (const symbol of [...this.positions.keys()]) {
+      const mark = this.marks.get(symbol);
+
+      if (!mark) {
+        results.push(this.#reject(
+          REJECT_REASON.NO_MARK_PRICE,
+          `No price seen for ${symbol}; cannot value the position`
+        ));
+        continue;
+      }
+
+      results.push(this.#closeLong(symbol, mark));
+    }
+
+    return results;
+  }
+
   /** Open positions, each marked to the latest price seen. */
   getPositions() {
     return [...this.positions.values()].map((position) => this.#describePosition(position));
@@ -200,6 +224,65 @@ export class PaperBroker {
   /** Closed trades, oldest first, each with its realized PnL. */
   getTrades() {
     return this.trades.map((trade) => this.#describeTrade(trade));
+  }
+
+
+  /**
+   * Rebuild state from persisted books.
+   *
+   * Cash is DERIVED, not stored: starting - open cost basis + realized PnL.
+   * Both terms come from the two tables, so there is no third place for the
+   * balance to disagree with them.
+   */
+  restore({ positions = [], trades = [] }) {
+    this.positions.clear();
+    this.trades = [];
+
+    let costBasis = 0n;
+
+    for (const row of positions) {
+      const entryPrice = parseMoney(row.entry_price);
+      const quantity = Number(row.quantity);
+
+      this.positions.set(row.symbol, {
+        symbol: row.symbol,
+        quantity,
+        entryPrice,
+        openedAt: Number(row.opened_at),
+      });
+
+      costBasis += entryPrice * BigInt(quantity);
+    }
+
+    let realized = 0n;
+
+    for (const row of trades) {
+      const pnl = parseMoney(row.pnl);
+      realized += pnl;
+
+      this.trades.push({
+        id: row.id,
+        symbol: row.symbol,
+        side: row.side,
+        quantity: Number(row.quantity),
+        entryPrice: parseMoney(row.entry_price),
+        exitPrice: parseMoney(row.exit_price),
+        pnl,
+        openedAt: Number(row.opened_at),
+        closedAt: Number(row.closed_at),
+      });
+    }
+
+    this.nextTradeId = this.trades.reduce((max, t) => Math.max(max, t.id), 0) + 1;
+    this.cash = this.startingBalance - costBasis + realized;
+
+    if (this.cash < 0n) {
+      throw new Error(
+        `Restored cash is negative (${formatMoney(this.cash)}); books are inconsistent`
+      );
+    }
+
+    return this.getSummary();
   }
 
   /** Uninvested cash, not equity — see getSummary(). */

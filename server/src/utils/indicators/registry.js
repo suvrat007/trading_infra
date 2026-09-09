@@ -19,6 +19,8 @@ const DEFINITIONS = [
     id: 'movingAverages',
     compute: ({ closes }) => ({
       sma20: sma(closes, PERIODS.SMA_FAST),
+      ema9: ema(closes, PERIODS.EMA_VERY_FAST),
+      ema21: ema(closes, PERIODS.EMA_MEDIUM),
       sma50: sma(closes, PERIODS.SMA_SLOW),
       ema20: ema(closes, PERIODS.EMA_FAST),
       ema50: ema(closes, PERIODS.EMA_SLOW),

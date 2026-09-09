@@ -6,6 +6,7 @@ import {
 } from '../../constants/candles.js';
 import { INTERVAL, SYMBOL } from '../../constants/binance.js';
 import { ERROR_CODE } from '../../constants/http.js';
+import { STRATEGY_NAMES } from '../strategies/factory.js';
 import { ApiError } from './errors.js';
 
 const parseSymbol = (raw) => {
@@ -91,3 +92,37 @@ export const parseAuditQuery = (query = {}) => ({
   interval: parseInterval(query.interval),
   deep: parseBooleanFlag(query.deep, 'deep'),
 });
+
+/** GET /api/trades — limit only; trades are not filtered by symbol yet. */
+export const parseTradesQuery = (query = {}) => ({
+  limit: parseLimit(query.limit),
+});
+
+/**
+ * POST /api/strategy/start body.
+ *
+ * Only the shape is checked here; the strategy constructor validates the
+ * parameter VALUES and produces a better message than this layer could.
+ */
+export const parseStrategyBody = (body) => {
+  if (!body || typeof body !== 'object') {
+    throw ApiError.badRequest(ERROR_CODE.INVALID_BODY, 'Expected a JSON object body');
+  }
+
+  const name = String(body.name ?? '').toLowerCase();
+
+  if (!STRATEGY_NAMES.includes(name)) {
+    throw ApiError.badRequest(
+      ERROR_CODE.INVALID_STRATEGY,
+      `Unknown strategy "${body.name}". Available: ${STRATEGY_NAMES.join(', ')}`
+    );
+  }
+
+  const params = body.params ?? {};
+
+  if (typeof params !== 'object' || Array.isArray(params)) {
+    throw ApiError.badRequest(ERROR_CODE.INVALID_BODY, 'params must be an object');
+  }
+
+  return { name, params };
+};

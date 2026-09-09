@@ -42,29 +42,36 @@ const scheduleRepair = (symbol, interval) => {
 
 export const startContinuityWatch = (source) => {
   const onCandle = (candle) => {
-    const intervalMs = intervalToMs(candle.interval);
-    const { order, missing } = classifyCandle(candle.open_time, lastOpenTime, intervalMs);
+    // emit() is synchronous, so a throw here escapes into the ingester and is
+    // reported as an insert failure. Gap detection is a guard; it must never
+    // interfere with the candle that triggered it.
+    try {
+      const intervalMs = intervalToMs(candle.interval);
+      const { order, missing } = classifyCandle(candle.open_time, lastOpenTime, intervalMs);
 
-    if (order === CANDLE_ORDER.STALE) {
-      // Do not move the marker backwards, or the next candle would look like a
-      // gap the size of however far back this one reached.
+      if (order === CANDLE_ORDER.STALE) {
+        // Do not move the marker backwards, or the next candle would look like
+        // a gap the size of however far back this one reached.
+        console.warn(
+          `${LOG_CONTINUITY} out-of-order candle ${candle.open_time} ` +
+          `(newest is ${lastOpenTime}) — ignored`
+        );
+        return;
+      }
+
+      lastOpenTime = Math.max(candle.open_time, lastOpenTime ?? candle.open_time);
+
+      if (order !== CANDLE_ORDER.GAP) return;
+
       console.warn(
-        `${LOG_CONTINUITY} out-of-order candle ${candle.open_time} ` +
-        `(newest is ${lastOpenTime}) — ignored`
+        `${LOG_CONTINUITY} ${missing} candle(s) missing before ` +
+        `${new Date(candle.open_time).toISOString()} — scheduling repair`
       );
-      return;
+
+      scheduleRepair(candle.symbol, candle.interval);
+    } catch (err) {
+      console.error(`${LOG_CONTINUITY} check failed for ${candle?.open_time}:`, err.message);
     }
-
-    lastOpenTime = Math.max(candle.open_time, lastOpenTime ?? candle.open_time);
-
-    if (order !== CANDLE_ORDER.GAP) return;
-
-    console.warn(
-      `${LOG_CONTINUITY} ${missing} candle(s) missing before ` +
-      `${new Date(candle.open_time).toISOString()} — scheduling repair`
-    );
-
-    scheduleRepair(candle.symbol, candle.interval);
   };
 
   source.on('candle', onCandle);

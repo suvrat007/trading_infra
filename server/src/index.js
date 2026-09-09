@@ -7,6 +7,8 @@ import { runBackfill } from './backfill.js';
 import { startContinuityWatch, stopContinuityWatch } from './continuity.js';
 import { candles, startIngest, stopIngest } from './ingest.js';
 import { startIndicatorEngine, stopIndicatorEngine } from './indicatorEngine.js';
+import { getBroker, startStrategyRunner, stopStrategyRunner } from './strategyRunner.js';
+import { buildAccountMessage } from './utils/broadcast/message.js';
 import { startBroadcast, stopBroadcast } from './broadcast.js';
 
 await assertDbReady();
@@ -16,52 +18,56 @@ const server = app.listen(PORT, () => {
   console.log(`${LOG_APP} REST API listening on http://localhost:${PORT}`);
 });
 
-// The whole pipeline, wired in one place and nowhere else.
+// The whole pipeline, wired here and nowhere else.
 //
-//   ingest ──emit('candle')──> indicators ──emit('candle')──> broadcast
-//      │           │
-//      │           └─ continuity watch: a gap in the stream schedules a repair
-//      └─ on every (re)connect: backfill whatever the stream missed
+//   ingest ──emit──> indicators ──emit──> broadcast ──ws:8080──> browser
+//      │                  │
+//      │                  └──> strategy runner ──> PaperBroker ──> trades/positions
+//      │
+//      └─ continuity watch (raw stream): a gap schedules a repair
 //
-//   audit: on boot and every 15 min — verifies integrity, repairs completeness
-//
-// Three independent triggers for the same repair, covering three different
-// failure modes: a reconnect (we were away), a gap in the live stream (a write
-// failed while we were here), and a scheduled sweep (something changed the data
-// without going through us at all).
+// Repair has three triggers: reconnect, a gap in the live stream, and a
+// scheduled audit. All converge on the same idempotent backfill.
 const enrichedCandles = startIndicatorEngine(candles);
 
-// Watches the RAW ingest output, not the enriched stream: a missing candle is
-// an ingestion problem, and noticing it should not depend on indicators having
-// succeeded.
+// Watches the RAW stream: a missing candle is an ingestion problem, and
+// noticing it must not depend on indicators having succeeded.
 startContinuityWatch(candles);
 
-startBroadcast(enrichedCandles);
+// Reads indicator values, so it must sit after the engine.
+await startStrategyRunner(enrichedCandles);
+
+startBroadcast(enrichedCandles, {
+  snapshot: () => (getBroker() ? [buildAccountMessage(getBroker())] : []),
+  // Live ticks bypass indicators and the strategy — chart only.
+  tickSource: candles,
+});
+
 startIngest({ onConnect: () => runBackfill() });
 startAuditSchedule();
 
 let shuttingDown = false;
 
 const shutdown = async (signal) => {
-  if (shuttingDown) return;
+  if (shuttingDown) return; // a second Ctrl+C should not race the first
   shuttingDown = true;
 
   console.log(`\n${LOG_APP} ${signal} — shutting down`);
 
-  // If something is wedged, do not hang forever waiting on it.
   const forceExit = setTimeout(() => {
     console.error(`${LOG_APP} shutdown timed out — forcing exit`);
     process.exit(1);
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
-  // Tear down in pipeline order, so nothing emits into a closed stage.
+  // Pipeline order, so nothing emits into a closed stage.
   stopIngest();
   stopContinuityWatch();
   stopAuditSchedule();
+  stopStrategyRunner();
   stopIndicatorEngine();
   await stopBroadcast();
-  await new Promise((resolve) => server.close(resolve)); // drain in-flight requests
+  await new Promise((resolve) => server.close(resolve));
   await pool.end();
 
   console.log(`${LOG_APP} clean exit`);

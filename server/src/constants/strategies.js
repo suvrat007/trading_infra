@@ -1,3 +1,4 @@
+import './env.js';
 import { PERIODS } from './indicators.js';
 
 /**
@@ -30,7 +31,7 @@ export const CROSS = {
  * reason — the wire carries one MACD, computed at PERIODS.MACD_*.
  */
 export const DEFAULT_STRATEGY_PARAMS = {
-  ema: { fastPeriod: PERIODS.EMA_FAST, slowPeriod: PERIODS.EMA_SLOW },
+  ema: { fastPeriod: PERIODS.EMA_VERY_FAST, slowPeriod: PERIODS.EMA_MEDIUM },
   rsi: { period: PERIODS.RSI, oversold: 30, overbought: 70 },
   macd: {
     fastPeriod: PERIODS.MACD_FAST,
@@ -41,3 +42,6 @@ export const DEFAULT_STRATEGY_PARAMS = {
 
 /** RSI is defined on 0-100; thresholds outside that can never fire. */
 export const RSI_BOUNDS = { MIN: 0, MAX: 100 };
+
+/** Which strategy trades. One at a time — see strategyRunner.js. */
+export const ACTIVE_STRATEGY = (process.env.STRATEGY || 'ema').toLowerCase();

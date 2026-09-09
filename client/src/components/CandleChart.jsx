@@ -4,8 +4,14 @@ import {
   HistogramSeries,
   LineSeries,
   createChart,
+  createSeriesMarkers,
 } from 'lightweight-charts';
-import { CANDLESTICK_OPTIONS, CHART_OPTIONS, PRICE_FORMAT } from '../constants/chart.js';
+import {
+  CANDLESTICK_OPTIONS,
+  CHART_OPTIONS,
+  MARKER_STYLE,
+  PRICE_FORMAT,
+} from '../constants/chart.js';
 import {
   ALL_INDICATOR_SERIES,
   PANEL_DEFINITIONS,
@@ -48,6 +54,13 @@ const CandleChartImpl = forwardRef(function CandleChart(_props, ref) {
   // key -> { series, definition }. A Map rather than state: these are canvas
   // handles, not rendered values, and must never trigger a React update.
   const seriesRef = useRef(new Map());
+
+  // Newest bar drawn. update() throws on an older timestamp, so ticks are
+  // checked against it rather than trusted.
+  const lastTimeRef = useRef(null);
+
+  // v5 exposes markers as a plugin attached to a series, not a series method.
+  const markersRef = useRef(null);
 
   useEffect(() => {
     const chart = createChart(containerRef.current, CHART_OPTIONS);
@@ -98,6 +111,7 @@ const CandleChartImpl = forwardRef(function CandleChart(_props, ref) {
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     seriesRef.current = registry;
+    markersRef.current = createSeriesMarkers(candleSeries, []);
 
     return () => {
       // Must run: the chart holds a canvas, and StrictMode mounts twice in dev.
@@ -107,6 +121,7 @@ const CandleChartImpl = forwardRef(function CandleChart(_props, ref) {
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
+      markersRef.current = null;
       seriesRef.current = new Map();
     };
   }, []);
@@ -125,6 +140,7 @@ const CandleChartImpl = forwardRef(function CandleChart(_props, ref) {
       }
 
       chartRef.current?.timeScale().fitContent();
+      lastTimeRef.current = candles.length ? toChartTime(candles.at(-1).open_time) : null;
     },
 
     /**
@@ -135,6 +151,7 @@ const CandleChartImpl = forwardRef(function CandleChart(_props, ref) {
      */
     appendCandle(candle) {
       candleSeriesRef.current?.update(toChartCandle(candle));
+      lastTimeRef.current = toChartTime(candle.open_time);
 
       const values = candle.indicators;
       if (!values) return; // indicators failed server-side; leave the series alone
@@ -151,6 +168,46 @@ const CandleChartImpl = forwardRef(function CandleChart(_props, ref) {
 
         series.update(toSeriesPoint(time, value, definition));
       }
+    },
+
+    /**
+     * Redraw the bar currently forming.
+     *
+     * Candlestick series only — indicators are defined on closed bars, so the
+     * lines stay put until the bar seals. update() replaces a same-timestamp
+     * bar, so the candle grows in place rather than duplicating.
+     */
+    updateTick(tick) {
+      const time = toChartTime(tick.open_time);
+
+      // A tick for a bar older than what is drawn would throw inside update().
+      if (lastTimeRef.current !== null && time < lastTimeRef.current) return;
+
+      candleSeriesRef.current?.update(toChartCandle(tick));
+      lastTimeRef.current = time;
+    },
+
+    /**
+     * Replace every signal marker.
+     *
+     * setMarkers is all-or-nothing, so the caller owns the full list and this
+     * just renders it. Sorted ascending and deduped by (time, side) because the
+     * plugin requires ordered times and a trade's exit can coincide with the
+     * next entry.
+     */
+    setSignals(signals) {
+      const seen = new Set();
+      const markers = [];
+
+      for (const { time, side } of [...signals].sort((a, b) => a.time - b.time)) {
+        const key = `${time}:${side}`;
+        if (seen.has(key) || !MARKER_STYLE[side]) continue;
+
+        seen.add(key);
+        markers.push({ time, ...MARKER_STYLE[side] });
+      }
+
+      markersRef.current?.setMarkers(markers);
     },
 
     /**

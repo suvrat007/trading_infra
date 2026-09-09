@@ -25,6 +25,8 @@ export const INDICATOR_WARMUP = 100;
 export const PERIODS = {
   SMA_FAST: 20,
   SMA_SLOW: 50,
+  EMA_VERY_FAST: 9,
+  EMA_MEDIUM: 21,
   EMA_FAST: 20,
   EMA_SLOW: 50,
   RSI: 14,
@@ -61,7 +63,7 @@ export const INDICATOR_PRECISION = 8;
  * their parameters against it without importing the engine.
  */
 export const INDICATOR_KEYS = Object.freeze([
-  'sma20', 'sma50', 'ema20', 'ema50',
+  'sma20', 'sma50', 'ema9', 'ema21', 'ema20', 'ema50',
   'rsi14',
   'macd', 'macdSignal', 'macdHistogram',
   'bbUpper', 'bbMiddle', 'bbLower', 'bbBandwidth', 'bbPercentB',

@@ -1,25 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
 import { CONNECTION_STATUS, WS_URL } from '../constants/websocket.js';
 import { backoffDelay } from '../utils/stream/backoff.js';
-import { isCandleMessage, parseStreamMessage } from '../utils/stream/message.js';
+import {
+  isAccountMessage,
+  isCandleMessage,
+  isSignalMessage,
+  isTickMessage,
+  parseStreamMessage,
+} from '../utils/stream/message.js';
 
 /**
  * Holds one WebSocket to the broadcast server for the life of the component,
  * reconnecting with backoff when it drops.
  *
- * @param {(candle: object) => void} onCandle   called per live candle
+ * @param {(candle: object) => void} onCandle   called per CLOSED candle
+ * @param {(tick: object) => void} [onTick]     called per forming-bar update
  * @param {() => void} [onReconnect]            called after a *re*connect, so the
  *   caller can backfill candles missed while the socket was down
  */
-export const useCandleStream = ({ onCandle, onReconnect }) => {
+export const useCandleStream = ({ onCandle, onTick, onSignal, onAccount, onReconnect }) => {
   const [status, setStatus] = useState(CONNECTION_STATUS.CONNECTING);
 
   // Callbacks live in refs so that a parent re-render (which creates new
   // function identities) does not tear down and rebuild the socket.
-  const onCandleRef = useRef(onCandle);
-  const onReconnectRef = useRef(onReconnect);
-  onCandleRef.current = onCandle;
-  onReconnectRef.current = onReconnect;
+  // Every callback lives in a ref so a parent re-render cannot rebuild the socket.
+  const handlers = useRef({});
+  handlers.current = { onCandle, onTick, onSignal, onAccount, onReconnect };
 
   useEffect(() => {
     let socket = null;
@@ -40,13 +46,18 @@ export const useCandleStream = ({ onCandle, onReconnect }) => {
         // Only on a RE-connect: candles may have closed while we were away,
         // and the broadcast server has no replay buffer. Refetch history so
         // the chart does not keep a permanent hole in it.
-        if (hasConnectedBefore) onReconnectRef.current?.();
+        if (hasConnectedBefore) handlers.current.onReconnect?.();
         hasConnectedBefore = true;
       };
 
       socket.onmessage = (event) => {
         const message = parseStreamMessage(event.data);
-        if (isCandleMessage(message)) onCandleRef.current?.(message.data);
+        const { onCandle: c, onTick: t, onSignal: s, onAccount: a } = handlers.current;
+
+        if (isCandleMessage(message)) c?.(message.data);
+        else if (isTickMessage(message)) t?.(message.data);
+        else if (isSignalMessage(message)) s?.(message.data);
+        else if (isAccountMessage(message)) a?.(message.data);
       };
 
       // 'error' is always followed by 'close', so reconnect logic lives in one

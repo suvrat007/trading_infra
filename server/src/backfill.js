@@ -13,6 +13,7 @@ import {
   SQL_FIND_INTERIOR_GAPS,
   SQL_INSERT_CANDLE,
 } from './constants/sql.js';
+import { pruneSeries } from './retention.js';
 import { fetchKlines, restKlineToRow } from './utils/backfill/klines.js';
 import { planRequests } from './utils/backfill/ranges.js';
 import {
@@ -162,6 +163,10 @@ export const runBackfill = async ({ symbol = SYMBOL, interval = INTERVAL } = {})
         `fetched ${result.fetched}, inserted ${result.inserted}`
       );
     }
+
+    // Once per run, not per row — a 5,000-candle fill would otherwise issue
+    // 5,000 DELETEs to remove the same handful of rows.
+    if (inserted > 0) await pruneSeries(symbol, interval);
 
     console.log(
       `${LOG_BACKFILL} done: ${inserted} new candle(s) in ${Date.now() - startedAt}ms`

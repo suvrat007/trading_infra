@@ -28,3 +28,16 @@ export function klineToCandle(k, id) {
     volume: k.v,
   };
 }
+
+/** Forming kline -> tick. No id: it is not stored, so it has no row. */
+export const klineToTick = (k) => ({
+  symbol: k.s,
+  interval: k.i,
+  open_time: k.t,
+  open: k.o,
+  high: k.h,
+  low: k.l,
+  close: k.c,
+  volume: k.v,
+  closed: false,
+});

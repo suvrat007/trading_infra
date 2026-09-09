@@ -15,6 +15,9 @@ export const WS_MAX_BUFFERED_BYTES = 1_048_576;
 export const WS_MESSAGE_TYPE = {
   WELCOME: 'welcome',
   CANDLE: 'candle',
+  TICK: 'tick',
+  SIGNAL: 'signal',
+  ACCOUNT: 'account',
 };
 
 // RFC 6455 close codes.

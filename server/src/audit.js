@@ -1,5 +1,6 @@
 import { pool } from './db.js';
 import { inspectGaps, runBackfill } from './backfill.js';
+import { inspectRetention, pruneCandles } from './retention.js';
 import { INTERVAL, SYMBOL } from './constants/binance.js';
 import {
   AUDIT_INTERVAL_MS,
@@ -66,11 +67,12 @@ export const runAudit = async ({
   const intervalMs = intervalToMs(interval);
 
   // Independent queries, so run them together rather than in sequence.
-  const [rowCounts, jumps, duplicates, gaps] = await Promise.all([
+  const [rowCounts, jumps, duplicates, gaps, retention] = await Promise.all([
     pool.query(ROW_CHECK_QUERY, [symbol, interval, intervalMs]),
     pool.query(SQL_AUDIT_PRICE_JUMPS, [symbol, interval, MAX_CLOSE_JUMP_RATIO]),
     pool.query(SQL_AUDIT_DUPLICATES, [symbol, interval]),
     inspectGaps({ symbol, interval }),
+    inspectRetention(),
   ]);
 
   const counts = rowCounts.rows[0];
@@ -122,6 +124,7 @@ export const runAudit = async ({
       newest: gaps.newest === null ? null : Number(gaps.newest),
     },
     freshness,
+    retention,
     checks,
     durationMs: Date.now() - startedAt,
   };
@@ -169,6 +172,10 @@ let auditTimer = null;
  */
 const auditAndRepair = async ({ symbol, interval, label }) => {
   try {
+    // Prune BEFORE auditing: pruning raises min(open_time), so the gap scan
+    // that follows will not treat the removed range as missing and refetch it.
+    await pruneCandles();
+
     const report = await runAudit({ symbol, interval });
 
     if (report.errors > 0) {

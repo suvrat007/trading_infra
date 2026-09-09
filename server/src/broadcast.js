@@ -8,11 +8,17 @@ import {
   isOriginAllowed,
   sweepDeadClients,
 } from './utils/broadcast/client.js';
-import { buildCandleMessage, buildWelcomeMessage } from './utils/broadcast/message.js';
+import {
+  buildCandleMessage,
+  buildTickMessage,
+  buildWelcomeMessage,
+} from './utils/broadcast/message.js';
 
 let wss = null;
 let heartbeatTimer = null;
 let unsubscribe = null;
+let unsubscribeTick = null;
+let snapshotProvider = null;
 
 function handleConnection(ws, req) {
   const { origin } = req.headers;
@@ -34,6 +40,12 @@ function handleConnection(ws, req) {
   });
 
   ws.send(JSON.stringify(buildWelcomeMessage({ symbol: SYMBOL, interval: INTERVAL })));
+
+  // A new client would otherwise show an empty account until the next fill,
+  // which may be hours away.
+  for (const message of snapshotProvider?.() ?? []) {
+    ws.send(JSON.stringify(message));
+  }
   console.log(`${LOG_WS} client connected (${wss.clients.size} total)`);
 }
 
@@ -43,7 +55,8 @@ function startHeartbeat() {
 }
 
 
-export function startBroadcast(source) {
+export const startBroadcast = (source, { snapshot = null, tickSource = null } = {}) => {
+  snapshotProvider = snapshot;
   wss = new WebSocketServer({ port: WS_PORT });
 
   wss.on('listening', () => {
@@ -62,6 +75,14 @@ export function startBroadcast(source) {
   source.on('candle', onCandle);
   unsubscribe = () => source.off('candle', onCandle);
 
+  // Ticks come from the RAW stream and skip the indicator engine entirely:
+  // indicators are only defined on closed bars.
+  if (tickSource) {
+    const onTick = (tick) => broadcastToClients(wss.clients, buildTickMessage(tick));
+    tickSource.on('tick', onTick);
+    unsubscribeTick = () => tickSource.off('tick', onTick);
+  }
+
   startHeartbeat();
   return wss;
 }
@@ -78,3 +99,9 @@ export async function stopBroadcast() {
   await new Promise((resolve) => wss.close(resolve));
   wss = null;
 }
+
+/** Push any message to every connected client. Used by the strategy runner. */
+export const publish = (message) => {
+  if (!wss) return 0;
+  return broadcastToClients(wss.clients, message);
+};

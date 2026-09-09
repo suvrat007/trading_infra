@@ -80,3 +80,71 @@ END $$;
 -- deliberately NOT a constraint: the multiplier depends on the `interval`
 -- column, so the CHECK would need a CASE listing every interval and would have
 -- to be rewritten each time one is added. It is an audit check instead.
+
+
+-- ---------------------------------------------------------------------------
+-- Phase 3: paper trading
+-- ---------------------------------------------------------------------------
+
+-- Closed round trips. Append-only; a trade is never updated after it lands.
+CREATE TABLE IF NOT EXISTS trades (
+    id           serial PRIMARY KEY,
+    symbol       varchar(20)   NOT NULL,
+    side         varchar(4)    NOT NULL,
+    -- numeric, not integer: enabling fractional units later needs no migration.
+    quantity     numeric(28,8) NOT NULL,
+    entry_price  numeric(18,8) NOT NULL,
+    exit_price   numeric(18,8) NOT NULL,
+    pnl          numeric(28,8) NOT NULL,
+    opened_at    timestamptz   NOT NULL,
+    closed_at    timestamptz   NOT NULL DEFAULT now()
+);
+
+-- Open positions. One row per symbol, mirroring the broker's invariant.
+CREATE TABLE IF NOT EXISTS positions (
+    id           serial PRIMARY KEY,
+    symbol       varchar(20)   NOT NULL,
+    quantity     numeric(28,8) NOT NULL,
+    entry_price  numeric(18,8) NOT NULL,
+    opened_at    timestamptz   NOT NULL DEFAULT now()
+);
+
+-- One open position per symbol, enforced here rather than trusted in memory.
+CREATE UNIQUE INDEX IF NOT EXISTS positions_symbol_key ON positions (symbol);
+
+-- Trade history is read newest-first.
+CREATE INDEX IF NOT EXISTS trades_closed_at_desc_idx ON trades (closed_at DESC);
+CREATE INDEX IF NOT EXISTS trades_symbol_closed_at_idx ON trades (symbol, closed_at DESC);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'trades_side_valid') THEN
+        ALTER TABLE trades ADD CONSTRAINT trades_side_valid CHECK (side IN ('BUY', 'SELL'));
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'trades_amounts_positive') THEN
+        ALTER TABLE trades ADD CONSTRAINT trades_amounts_positive CHECK (
+            quantity > 0 AND entry_price > 0 AND exit_price > 0
+        );
+    END IF;
+
+    -- PnL must equal the arithmetic that produced it. Catches a broker bug or a
+    -- hand-edited row; direction depends on which way the position was held.
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'trades_pnl_consistent') THEN
+        ALTER TABLE trades ADD CONSTRAINT trades_pnl_consistent CHECK (
+            (side = 'BUY'  AND pnl = (exit_price - entry_price) * quantity)
+            OR
+            (side = 'SELL' AND pnl = (entry_price - exit_price) * quantity)
+        );
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'trades_closed_after_open') THEN
+        ALTER TABLE trades ADD CONSTRAINT trades_closed_after_open CHECK (closed_at >= opened_at);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'positions_amounts_positive') THEN
+        ALTER TABLE positions ADD CONSTRAINT positions_amounts_positive CHECK (
+            quantity > 0 AND entry_price > 0
+        );
+    END IF;
+END $$;
