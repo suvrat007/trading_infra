@@ -2,6 +2,7 @@ import './env.js';
 import { COLD_START_CANDLES } from './backfill.js';
 import { MAX_CANDLE_LIMIT } from './candles.js';
 import { INDICATOR_LOOKBACK, INDICATOR_WARMUP } from './indicators.js';
+import { RETENTION_BY_TIMEFRAME } from './timeframes.js';
 
 /**
  * Rolling cap on stored candles, per (symbol, interval).
@@ -35,4 +36,19 @@ if (RETENTION_ENABLED && MAX_CANDLES_PER_SERIES < MIN_SAFE_RETENTION) {
     `system needs to function (${MIN_SAFE_RETENTION}). Indicators, REST limits and ` +
     'cold-start backfill would all be starved.'
   );
+}
+
+// Caps are now per timeframe, so the floor has to hold for every one of them.
+// Checked at boot rather than on first prune: a too-small cap silently starves
+// indicators, and the symptom (a strategy that never fires) points nowhere near
+// the cause.
+if (RETENTION_ENABLED) {
+  for (const [timeframe, cap] of Object.entries(RETENTION_BY_TIMEFRAME)) {
+    if (cap < MIN_SAFE_RETENTION) {
+      throw new RangeError(
+        `RETENTION_BY_TIMEFRAME["${timeframe}"] is ${cap}, below the minimum ` +
+        `${MIN_SAFE_RETENTION} the system needs. See constants/timeframes.js.`
+      );
+    }
+  }
 }

@@ -2,6 +2,7 @@ import { pool } from './db.js';
 import { LOG_RETENTION } from './constants/logging.js';
 import { MAX_CANDLES_PER_SERIES, RETENTION_ENABLED } from './constants/retention.js';
 import { SQL_DISTINCT_SERIES, SQL_PRUNE_CANDLES } from './constants/sql.js';
+import { retentionFor } from './constants/timeframes.js';
 
 /**
  * Keeps the candles table bounded: newest N per (symbol, interval).
@@ -17,13 +18,18 @@ import { SQL_DISTINCT_SERIES, SQL_PRUNE_CANDLES } from './constants/sql.js';
  * snapshot, so the DELETE could not see the row just added and the table would
  * settle at cap + 1.
  */
-export const pruneSeries = async (symbol, interval, limit = MAX_CANDLES_PER_SERIES) => {
+export const pruneSeries = async (symbol, interval, limit = null) => {
   if (!RETENTION_ENABLED) return 0;
 
-  const { rowCount } = await pool.query(SQL_PRUNE_CANDLES, [symbol, interval, limit]);
+  // Per timeframe, not one flat number. 5,000 bars is 3.5 days of 1m data but
+  // 13 years of 1d data — a single cap would starve one end and hoard the
+  // other. An explicit `limit` still wins, for the audit sweep and for tests.
+  const cap = limit ?? retentionFor(interval);
+
+  const { rowCount } = await pool.query(SQL_PRUNE_CANDLES, [symbol, interval, cap]);
 
   if (rowCount > 0) {
-    console.log(`${LOG_RETENTION} ${symbol} ${interval}: pruned ${rowCount} (cap ${limit})`);
+    console.log(`${LOG_RETENTION} ${symbol} ${interval}: pruned ${rowCount} (cap ${cap})`);
   }
 
   return rowCount;

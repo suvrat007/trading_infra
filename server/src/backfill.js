@@ -1,5 +1,6 @@
 import { pool } from './db.js';
 import { INTERVAL, SYMBOL } from './constants/binance.js';
+import { ACTIVE_TIMEFRAMES } from './constants/timeframes.js';
 import {
   COLD_START_CANDLES,
   GAP_SCAN_LIMIT,
@@ -202,4 +203,34 @@ export const inspectGaps = async ({ symbol = SYMBOL, interval = INTERVAL } = {})
       ? countCandlesBetween(bounds.oldest, latestClosedOpenTime(intervalMs), intervalMs)
       : 0,
   };
+};
+
+
+/**
+ * Repair every active timeframe, one after another.
+ *
+ * SEQUENTIAL, not parallel. Each run can fetch up to MAX_CANDLES_PER_RUN bars
+ * from Binance's REST API, and firing five of those at once is the fastest way
+ * to get rate-limited — which would fail the repair it was trying to perform.
+ * Five sequential runs at startup cost a few seconds and nothing is waiting.
+ *
+ * One timeframe failing must not stop the others: a 1d backfill that errors
+ * should not leave the 1m series unrepaired.
+ */
+export const runBackfillAll = async ({ symbol = SYMBOL, intervals = ACTIVE_TIMEFRAMES } = {}) => {
+  const results = {};
+
+  for (const interval of intervals) {
+    try {
+      results[interval] = await runBackfill({ symbol, interval });
+    } catch (err) {
+      console.error(`${LOG_BACKFILL} ${symbol} ${interval} failed:`, err.message);
+      results[interval] = { failed: true, error: err.message, missing: 0, inserted: 0, deferred: 0 };
+    }
+  }
+
+  const inserted = Object.values(results).reduce((sum, r) => sum + (r.inserted ?? 0), 0);
+  console.log(`${LOG_BACKFILL} sweep complete — ${inserted} candle(s) inserted across ${intervals.length} timeframe(s)`);
+
+  return results;
 };

@@ -6,6 +6,7 @@ import { ConnectionStatus } from './components/ConnectionStatus.jsx';
 import { IndicatorToggles } from './components/IndicatorToggles.jsx';
 import { PnlChart } from './components/PnlChart.jsx';
 import { StrategyControls } from './components/StrategyControls.jsx';
+import { TimeframeSelector } from './components/TimeframeSelector.jsx';
 import { TradeBlotter } from './components/TradeBlotter.jsx';
 import { DEFAULT_INTERVAL, DEFAULT_SYMBOL } from './constants/api.js';
 import { useAccount } from './hooks/useAccount.js';
@@ -14,6 +15,7 @@ import { useCandleHistory } from './hooks/useCandleHistory.js';
 import { useCandleStream } from './hooks/useCandleStream.js';
 import { useIndicatorVisibility } from './hooks/useIndicatorVisibility.js';
 import { useStrategyControl } from './hooks/useStrategyControl.js';
+import { useTimeframes } from './hooks/useTimeframes.js';
 import { intervalToMs } from './utils/stream/continuity.js';
 import { toTradeMarkers } from './utils/chart/pnl.js';
 import { toChartTime } from './utils/chart/candle.js';
@@ -33,13 +35,22 @@ const App = () => {
   const [indicatorValues, setIndicatorValues] = useState(null);
   const [liveSignals, setLiveSignals] = useState([]);
 
-  const { history, error, loading, refetch } = useCandleHistory();
+  // The server decides which timeframes exist and which is default; this is
+  // seeded from it rather than from a constant in the frontend.
+  const { timeframes, selected: interval, select: selectTimeframe } = useTimeframes();
+
+  // Refetches automatically whenever `interval` changes — the hook already
+  // aborts the in-flight request, so switching quickly cannot land an older
+  // response after a newer one.
+  const { history, error, loading, refetch } = useCandleHistory({
+    interval: interval ?? DEFAULT_INTERVAL,
+  });
   const { visibility, toggle } = useIndicatorVisibility(chartRef);
   const { account, trades, applyAccountMessage } = useAccount();
   const strategy = useStrategyControl();
 
   const { accept, syncTo } = useCandleContinuity({
-    interval: DEFAULT_INTERVAL,
+    interval: interval ?? DEFAULT_INTERVAL,
     onGap: useCallback((missing) => {
       console.warn(`[stream] ${missing} candle(s) missing — refetching history`);
       refetch();
@@ -65,13 +76,19 @@ const App = () => {
    * strategy is signalling but never filling.
    */
   const markers = useMemo(
-    () => [...toTradeMarkers(trades, intervalToMs(DEFAULT_INTERVAL)), ...liveSignals],
-    [trades, liveSignals]
+    () => [...toTradeMarkers(trades, intervalToMs(interval ?? DEFAULT_INTERVAL)), ...liveSignals],
+    [trades, liveSignals, interval]
   );
 
   useEffect(() => { chartRef.current?.setSignals(markers); }, [markers]);
 
   const handleCandle = useCallback((candle) => {
+    // One socket now carries all five timeframes. Anything that is not the one
+    // on screen must be dropped HERE, before continuity sees it — a 1d candle
+    // fed into a 1m continuity check reads as a gap of 1,439 bars and would
+    // trigger an endless refetch loop.
+    if (candle.interval !== interval) return;
+
     const { drawable, order, missing } = accept(candle.open_time);
 
     if (!drawable) {
@@ -85,13 +102,15 @@ const App = () => {
     chartRef.current?.appendCandle(candle);
     setLastPrice(candle.close);
     if (candle.indicators) setIndicatorValues(candle.indicators);
-  }, [accept]);
+  }, [accept, interval]);
 
   /** Forming bar. Chart and price only — never continuity, never the strategy. */
   const handleTick = useCallback((tick) => {
+    if (tick.interval !== interval) return;
+
     chartRef.current?.updateTick(tick);
     setLastPrice(tick.close);
-  }, []);
+  }, [interval]);
 
   const handleSignal = useCallback((signal) => {
     setLiveSignals((current) => [
@@ -113,7 +132,11 @@ const App = () => {
       <header className="header">
         <div className="header__symbol">
           <h1>{DEFAULT_SYMBOL}</h1>
-          <span className="header__interval">{DEFAULT_INTERVAL}</span>
+          <TimeframeSelector
+            timeframes={timeframes}
+            selected={interval}
+            onSelect={selectTimeframe}
+          />
         </div>
         <div className="header__right">
           {lastPrice && <span className="header__price">{Number(lastPrice).toFixed(2)}</span>}

@@ -7,6 +7,7 @@ import { accountRouter } from './routes/account.js';
 import { auditRouter } from './routes/audit.js';
 import { candlesRouter } from './routes/candles.js';
 import { strategyRouter } from './routes/strategy.js';
+import { timeframesRouter } from './routes/timeframes.js';
 import { healthRouter } from './routes/health.js';
 
 export const createApp = () => {
@@ -25,6 +26,7 @@ export const createApp = () => {
   app.use(API_PREFIX, auditRouter);
   app.use(API_PREFIX, accountRouter);
   app.use(API_PREFIX, strategyRouter);
+  app.use(API_PREFIX, timeframesRouter);
 
   // Order matters: these must be registered last.
   app.use(notFoundHandler);

@@ -191,3 +191,21 @@ export const SQL_PRUNE_CANDLES = `
       OFFSET ($3 - 1) LIMIT 1
     )
 `;
+
+/**
+ * Row count and range per timeframe, for one symbol.
+ *
+ * Feeds the timeframe picker: a timeframe with zero rows is shown but
+ * unselectable, which is the normal state for 1d during the first day of
+ * running. Grouping by interval lets Postgres answer from each partition
+ * separately rather than scanning one large table.
+ */
+export const SQL_TIMEFRAME_SUMMARY = `
+  SELECT "interval",
+         count(*)      AS count,
+         min(open_time) AS oldest,
+         max(open_time) AS newest
+  FROM candles
+  WHERE symbol = $1
+  GROUP BY "interval"
+`;

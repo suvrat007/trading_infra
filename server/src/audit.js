@@ -2,6 +2,7 @@ import { pool } from './db.js';
 import { inspectGaps, runBackfill } from './backfill.js';
 import { inspectRetention, pruneCandles } from './retention.js';
 import { INTERVAL, SYMBOL } from './constants/binance.js';
+import { ACTIVE_TIMEFRAMES } from './constants/timeframes.js';
 import {
   AUDIT_INTERVAL_MS,
   AUDIT_STATUS,
@@ -210,19 +211,32 @@ const auditAndRepair = async ({ symbol, interval, label }) => {
  * the audit endpoint is how you would diagnose the problem — a server that
  * refuses to start over a data issue takes its own diagnostics down with it.
  */
-export const startAuditSchedule = ({ symbol = SYMBOL, interval = INTERVAL } = {}) => {
-  auditAndRepair({ symbol, interval, label: 'startup' });
+export const startAuditSchedule = ({ symbol = SYMBOL, intervals = ACTIVE_TIMEFRAMES } = {}) => {
+  // Sequential across timeframes, for the same reason the backfill sweep is:
+  // each audit can trigger a repair that hits Binance's REST API, and five at
+  // once invites a rate limit.
+  const sweep = (label) => {
+    void (async () => {
+      for (const interval of intervals) {
+        try {
+          await auditAndRepair({ symbol, interval, label });
+        } catch (err) {
+          console.error(`${LOG_AUDIT} ${symbol} ${interval} audit failed:`, err.message);
+        }
+      }
+    })();
+  };
 
-  auditTimer = setInterval(
-    () => auditAndRepair({ symbol, interval, label: 'scheduled' }),
-    AUDIT_INTERVAL_MS
-  );
+  sweep('startup');
+
+  auditTimer = setInterval(() => sweep('scheduled'), AUDIT_INTERVAL_MS);
 
   // Do not let the audit timer alone keep the process alive.
   auditTimer.unref();
 
   console.log(
-    `${LOG_AUDIT} scheduled every ${AUDIT_INTERVAL_MS / 60000} minute(s)`
+    `${LOG_AUDIT} scheduled every ${AUDIT_INTERVAL_MS / 60000} minute(s) ` +
+    `across [${intervals.join(', ')}]`
   );
 };
 

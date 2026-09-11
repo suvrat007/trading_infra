@@ -20,24 +20,38 @@ import { intervalToMs } from './utils/shared/interval.js';
  */
 
 let unsubscribe = null;
-let repairTimer = null;
-let lastOpenTime = null;
+
+/**
+ * State is PER SERIES, not global.
+ *
+ * With one timeframe a single `lastOpenTime` was correct. With five interleaved
+ * on one socket it is actively wrong: a 1d candle followed by a 1m candle looks
+ * like a jump 1,439 minutes backwards, so every candle would be reported
+ * out-of-order and no real gap would ever be seen. Likewise one shared repair
+ * timer meant a 1m gap cancelled a pending 1h repair.
+ */
+const lastOpenTimes = new Map();
+const repairTimers = new Map();
+
+const keyOf = (symbol, interval) => `${symbol}|${interval}`;
 
 const scheduleRepair = (symbol, interval) => {
-  // Debounced: a flaky minute can produce several gaps, and one backfill after
-  // things settle beats one per gap. runBackfill also guards against
-  // overlapping runs, so a late trigger is harmless either way.
-  clearTimeout(repairTimer);
+  // Debounced per series: a flaky minute can produce several gaps, and one
+  // backfill after things settle beats one per gap. runBackfill also guards
+  // against overlapping runs, so a late trigger is harmless either way.
+  const key = keyOf(symbol, interval);
+  clearTimeout(repairTimers.get(key));
 
-  repairTimer = setTimeout(() => {
-    repairTimer = null;
+  const timer = setTimeout(() => {
+    repairTimers.delete(key);
     runBackfill({ symbol, interval }).catch((err) =>
-      console.error(`${LOG_CONTINUITY} repair failed:`, err.message)
+      console.error(`${LOG_CONTINUITY} repair failed for ${key}:`, err.message)
     );
   }, GAP_BACKFILL_DEBOUNCE_MS);
 
   // Never hold the process open for a repair that can wait for the next boot.
-  repairTimer.unref();
+  timer.unref();
+  repairTimers.set(key, timer);
 };
 
 export const startContinuityWatch = (source) => {
@@ -46,6 +60,9 @@ export const startContinuityWatch = (source) => {
     // reported as an insert failure. Gap detection is a guard; it must never
     // interfere with the candle that triggered it.
     try {
+      const key = keyOf(candle.symbol, candle.interval);
+      const lastOpenTime = lastOpenTimes.get(key) ?? null;
+
       const intervalMs = intervalToMs(candle.interval);
       const { order, missing } = classifyCandle(candle.open_time, lastOpenTime, intervalMs);
 
@@ -53,18 +70,18 @@ export const startContinuityWatch = (source) => {
         // Do not move the marker backwards, or the next candle would look like
         // a gap the size of however far back this one reached.
         console.warn(
-          `${LOG_CONTINUITY} out-of-order candle ${candle.open_time} ` +
+          `${LOG_CONTINUITY} ${key}: out-of-order candle ${candle.open_time} ` +
           `(newest is ${lastOpenTime}) — ignored`
         );
         return;
       }
 
-      lastOpenTime = Math.max(candle.open_time, lastOpenTime ?? candle.open_time);
+      lastOpenTimes.set(key, Math.max(candle.open_time, lastOpenTime ?? candle.open_time));
 
       if (order !== CANDLE_ORDER.GAP) return;
 
       console.warn(
-        `${LOG_CONTINUITY} ${missing} candle(s) missing before ` +
+        `${LOG_CONTINUITY} ${key}: ${missing} candle(s) missing before ` +
         `${new Date(candle.open_time).toISOString()} — scheduling repair`
       );
 
@@ -77,14 +94,14 @@ export const startContinuityWatch = (source) => {
   source.on('candle', onCandle);
   unsubscribe = () => source.off('candle', onCandle);
 
-  console.log(`${LOG_CONTINUITY} watching candle stream for gaps`);
+  console.log(`${LOG_CONTINUITY} watching candle stream for gaps (per symbol+interval)`);
 };
 
 export const stopContinuityWatch = () => {
   unsubscribe?.();
   unsubscribe = null;
 
-  clearTimeout(repairTimer);
-  repairTimer = null;
-  lastOpenTime = null;
+  for (const timer of repairTimers.values()) clearTimeout(timer);
+  repairTimers.clear();
+  lastOpenTimes.clear();
 };

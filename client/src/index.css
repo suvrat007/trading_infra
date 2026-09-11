@@ -411,3 +411,50 @@ body {
   .dashboard { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
   .dashboard__side { border-left: none; border-top: 1px solid var(--border); }
 }
+
+/* Timeframe picker ---------------------------------------------------------
+   Sits where the static interval label used to be. Buttons rather than a
+   <select> so the current timeframe is visible without opening anything —
+   switching is frequent, and one tap beats two. */
+.timeframes {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.timeframes__btn {
+  font: 500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim, #8b94a7);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 5px 9px;
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+
+.timeframes__btn:hover:not(:disabled) {
+  color: var(--text, #e6e9ef);
+  border-color: var(--border, #252b38);
+}
+
+.timeframes__btn--on,
+.timeframes__btn--on:hover:not(:disabled) {
+  color: #0e1117;
+  background: var(--accent, #f0b429);
+  border-color: var(--accent, #f0b429);
+}
+
+/* A timeframe with no rows yet — normal for 1d on the first day of running.
+   Shown rather than hidden, so it does not appear out of nowhere later. */
+.timeframes__btn:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+
+.timeframes__btn:focus-visible {
+  outline: 2px solid var(--accent, #f0b429);
+  outline-offset: 1px;
+}

@@ -3,13 +3,15 @@ import { assertDbReady, pool } from './db.js';
 import { PORT, SHUTDOWN_TIMEOUT_MS } from './constants/http.js';
 import { LOG_APP } from './constants/logging.js';
 import { startAuditSchedule, stopAuditSchedule } from './audit.js';
-import { runBackfill } from './backfill.js';
+import { runBackfillAll } from './backfill.js';
 import { startContinuityWatch, stopContinuityWatch } from './continuity.js';
 import { candles, startIngest, stopIngest } from './ingest.js';
 import { startIndicatorEngine, stopIndicatorEngine } from './indicatorEngine.js';
 import { getBroker, startStrategyRunner, stopStrategyRunner } from './strategyRunner.js';
 import { buildAccountMessage } from './utils/broadcast/message.js';
 import { startBroadcast, stopBroadcast } from './broadcast.js';
+import { startEngineBridge, stopEngineBridge } from './engineBridge.js';
+import { ENGINE_ENABLED, EXECUTION_MODE, LOG_ENGINE } from './constants/engine.js';
 
 await assertDbReady();
 
@@ -22,7 +24,11 @@ const server = app.listen(PORT, () => {
 //
 //   ingest ──emit──> indicators ──emit──> broadcast ──ws:8080──> browser
 //      │                  │
-//      │                  └──> strategy runner ──> PaperBroker ──> trades/positions
+//      │                  ├──> strategy runner ──> PaperBroker ──> trades/positions
+//      │                  │
+//      │                  └──> engine bridge ──zmq:5555──> C++ ──zmq:5556──┐
+//      │                                                                   │
+//      │                        (cpp mode) ─────> PaperBroker <────────────┘
 //      │
 //      └─ continuity watch (raw stream): a gap schedules a repair
 //
@@ -43,7 +49,21 @@ startBroadcast(enrichedCandles, {
   tickSource: candles,
 });
 
-startIngest({ onConnect: () => runBackfill() });
+// Another observer of the enriched stream. Started AFTER the strategy runner
+// because in cpp mode its signals execute through the runner's broker.
+if (ENGINE_ENABLED) {
+  try {
+    await startEngineBridge(enrichedCandles);
+  } catch (err) {
+    // A missing or broken engine binary must not stop the server. The
+    // JavaScript strategy is still subscribed and, outside cpp mode, still
+    // trading — so the system degrades to Phase 4 behaviour rather than dying.
+    console.error(`${LOG_ENGINE} bridge failed to start: ${err.message}`);
+    console.error(`${LOG_ENGINE} continuing without it (EXECUTION_MODE=${EXECUTION_MODE})`);
+  }
+}
+
+startIngest({ onConnect: () => runBackfillAll() });
 startAuditSchedule();
 
 let shuttingDown = false;
@@ -62,6 +82,7 @@ const shutdown = async (signal) => {
 
   // Pipeline order, so nothing emits into a closed stage.
   stopIngest();
+  await stopEngineBridge();
   stopContinuityWatch();
   stopAuditSchedule();
   stopStrategyRunner();

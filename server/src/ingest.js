@@ -1,7 +1,8 @@
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
 import { pool } from './db.js';
-import { INTERVAL, KLINE_STREAM_URL, SYMBOL } from './constants/binance.js';
+import { KLINE_STREAMS, KLINE_STREAM_URL, SYMBOL } from './constants/binance.js';
+import { ACTIVE_TIMEFRAMES } from './constants/timeframes.js';
 import { STALE_MS } from './constants/connection.js';
 import { SQL_INSERT_CANDLE } from './constants/sql.js';
 import { LOG_INGEST } from './constants/logging.js';
@@ -58,12 +59,16 @@ const connect = () => {
 
   ws.on('open', () => {
     attempt = 0;
-    console.log(`${LOG_INGEST} connected, streaming ${SYMBOL} ${INTERVAL} klines`);
+    console.log(
+      `${LOG_INGEST} connected, streaming ${SYMBOL} ` +
+      `[${ACTIVE_TIMEFRAMES.join(', ')}] on ${KLINE_STREAMS.length} stream(s)`
+    );
     armStaleTimer();
 
     // Fires on the FIRST connection and on every reconnect, so startup recovery
     // and outage recovery are the same code path. Deliberately not awaited: a
     // slow backfill must not delay processing of live candles arriving now.
+    // With several timeframes this now repairs all of them.
     Promise.resolve(onConnect?.()).catch((err) =>
       console.error(`${LOG_INGEST} onConnect handler failed:`, err.message)
     );
@@ -72,11 +77,16 @@ const connect = () => {
   ws.on('message', async (raw) => {
     armStaleTimer();
 
-    const msg = parseJsonFrame(raw);
-    if (!msg) {
+    const frame = parseJsonFrame(raw);
+    if (!frame) {
       console.error(`${LOG_INGEST} non-JSON frame ignored`);
       return;
     }
+
+    // Combined streams wrap every event as {stream, data}; a single-stream URL
+    // sends the event bare. Accept both, so the endpoint can change without
+    // touching anything below this line.
+    const msg = frame.data ?? frame;
     if (!msg.k) return; // not a kline event
 
     // Forming bar: broadcast so the chart ticks live, but never store it and
