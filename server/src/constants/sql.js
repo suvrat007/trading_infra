@@ -209,3 +209,25 @@ export const SQL_TIMEFRAME_SUMMARY = `
   WHERE symbol = $1
   GROUP BY "interval"
 `;
+
+export const SQL_SELECT_STRATEGIES = `
+  SELECT id, name, document, created_at, updated_at
+  FROM strategies ORDER BY updated_at DESC
+`;
+
+export const SQL_SELECT_STRATEGY = `
+  SELECT id, name, document, created_at, updated_at FROM strategies WHERE id = $1
+`;
+
+export const SQL_INSERT_STRATEGY = `
+  INSERT INTO strategies (name, document) VALUES ($1, $2)
+  RETURNING id, name, document, created_at, updated_at
+`;
+
+export const SQL_UPDATE_STRATEGY = `
+  UPDATE strategies SET name = $2, document = $3, updated_at = now()
+  WHERE id = $1
+  RETURNING id, name, document, created_at, updated_at
+`;
+
+export const SQL_DELETE_STRATEGY = 'DELETE FROM strategies WHERE id = $1 RETURNING id';

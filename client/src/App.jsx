@@ -5,6 +5,7 @@ import { ChartLegend } from './components/ChartLegend.jsx';
 import { ConnectionStatus } from './components/ConnectionStatus.jsx';
 import { IndicatorToggles } from './components/IndicatorToggles.jsx';
 import { PnlChart } from './components/PnlChart.jsx';
+import { StrategyBuilder } from './components/StrategyBuilder.jsx';
 import { StrategyControls } from './components/StrategyControls.jsx';
 import { TimeframeSelector } from './components/TimeframeSelector.jsx';
 import { TradeBlotter } from './components/TradeBlotter.jsx';
@@ -171,6 +172,11 @@ const App = () => {
             busy={strategy.busy}
             onStart={strategy.start}
             onStop={strategy.stop}
+          />
+          <StrategyBuilder
+            indicators={strategy.status?.computedIndicators ?? []}
+            timeframes={timeframes}
+            timeframe={interval ?? DEFAULT_INTERVAL}
           />
           <AccountPanel account={account} />
           <TradeBlotter trades={trades} />

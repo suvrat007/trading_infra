@@ -61,10 +61,12 @@ export class Strategy {
    * @param {object} indicators  latest scalar value per wire name; may be null
    *                             if the engine failed, and individual values may
    *                             be null while an indicator is still warming up
+   * @param {object} [context]   { hasPosition } — for strategies whose exit
+   *                             depends on whether we are holding
    * @returns {'BUY'|'SELL'|null}  null on almost every candle
    */
   // eslint-disable-next-line no-unused-vars
-  onCandle(candle, indicators) {
+  onCandle(candle, indicators, context) {
     throw new Error(`${this.constructor.name} must implement onCandle(candle, indicators)`);
   }
 

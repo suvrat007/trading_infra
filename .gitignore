@@ -13,6 +13,11 @@ node_modules/
 dist/
 build/
 
+# Test suites — kept local
+server/tests/
+client/src/**/*.test.js
+client/src/**/*.test.jsx
+
 # Logs and editor cruft
 *.log
 npm-debug.log*

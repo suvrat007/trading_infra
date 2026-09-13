@@ -7,6 +7,7 @@ import { closePosition, loadBooks, savePosition } from './utils/broker/persisten
 import { STRATEGY_NAMES, createStrategy } from './utils/strategies/factory.js';
 import { DEFAULT_STRATEGY_PARAMS } from './constants/strategies.js';
 import { INDICATOR_KEYS } from './constants/indicators.js';
+import { DEFAULT_TIMEFRAME } from './constants/timeframes.js';
 import { ENGINE_ACTION, ENGINE_ENABLED, ENGINE_TRADES } from './constants/engine.js';
 import { recordNodeDecision } from './utils/engine/compare.js';
 import { nowMicros } from './utils/engine/frame.js';
@@ -92,6 +93,11 @@ export const executeSignal = async ({ signal, symbol, price, openTime, strategyN
 
 const onCandle = async (candle) => {
   try {
+    // A rule strategy declares the timeframe it trades; anything else is not
+    // its candle. The socket now carries all five.
+    const wanted = strategy.timeframe ?? DEFAULT_TIMEFRAME;
+    if (candle.interval !== wanted) return;
+
     // Mark first: unrealized PnL should track price even on candles with no
     // signal. This happens in every mode, including when C++ does the trading —
     // marking is bookkeeping, not execution.
@@ -100,7 +106,9 @@ const onCandle = async (candle) => {
     // Timed for the Phase 7 comparison. Measures the strategy call ALONE, the
     // same span the C++ side times, so the two numbers describe the same work.
     const startedAt = nowMicros();
-    const signal = strategy.onCandle(candle, candle.indicators);
+    const signal = strategy.onCandle(candle, candle.indicators, {
+      hasPosition: broker.hasPosition(candle.symbol),
+    });
     const strategyUs = nowMicros() - startedAt;
 
     const actionable = signal === SIGNAL.BUY || signal === SIGNAL.SELL;
@@ -214,6 +222,7 @@ export const stopStrategy = async () => {
 export const getStrategyStatus = () => ({
   running,
   executes,
+  timeframe: strategy?.timeframe ?? DEFAULT_TIMEFRAME,
   strategy: strategy ? strategy.describe() : null,
   available: STRATEGY_NAMES,
   defaults: DEFAULT_STRATEGY_PARAMS,

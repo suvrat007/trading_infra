@@ -15,7 +15,10 @@ export function notFoundHandler(req, res) {
  */
 export function errorHandler(err, req, res, next) {
   if (err instanceof ApiError) {
-    res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    // `details` carries every validation error, so a form can mark them all at once.
+    res.status(err.status).json({
+      error: { code: err.code, message: err.message, ...(err.details && { details: err.details }) },
+    });
     return;
   }
 
